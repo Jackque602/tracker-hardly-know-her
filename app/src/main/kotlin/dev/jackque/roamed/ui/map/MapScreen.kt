@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.ZoomOutMap
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
@@ -18,6 +19,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -27,12 +29,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlinx.coroutines.launch
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -44,6 +48,7 @@ import dev.jackque.roamed.data.repo.MapStyle
 import dev.jackque.roamed.location.LocationTrackingService
 import dev.jackque.roamed.ui.common.rememberLocationPermissionState
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.CustomZoomButtonsController
 import org.osmdroid.views.MapView
@@ -60,6 +65,7 @@ fun MapScreen() {
     val permissions = rememberLocationPermissionState()
 
     val lifecycleOwner = LocalLifecycleOwner.current
+    val scope = rememberCoroutineScope()
     var followMe by remember { mutableStateOf(true) }
 
     val mapView = remember {
@@ -172,6 +178,30 @@ fun MapScreen() {
                 .padding(16.dp),
             horizontalAlignment = Alignment.End,
         ) {
+            // Nothing uncovered means nothing to frame, and a button that does nothing when
+            // pressed is worse than one that is not there.
+            if (fogState.cellCount > 0) {
+                SmallFloatingActionButton(
+                    onClick = {
+                        scope.launch {
+                            viewModel.exploredBounds()?.let { bounds ->
+                                // An explicit fit should stick, so stop the next fix recentring.
+                                followMe = false
+                                mapView.zoomToBoundingBox(
+                                    BoundingBox(bounds.north, bounds.east, bounds.south, bounds.west),
+                                    true,
+                                    FIT_PADDING_PX,
+                                    FIT_MAX_ZOOM,
+                                    null,
+                                )
+                            }
+                        }
+                    },
+                ) {
+                    Icon(Icons.Filled.ZoomOutMap, contentDescription = "Fit everywhere I have been")
+                }
+                Spacer(Modifier.height(12.dp))
+            }
             FloatingActionButton(
                 onClick = {
                     fogState.lastFix?.let { fix ->
@@ -271,3 +301,9 @@ private fun PermissionCard(
 }
 
 private const val FOLLOW_ZOOM = 15.0
+
+/** Breathing room around the fitted box, so the fog edge is not flush against the screen. */
+private const val FIT_PADDING_PX = 96
+
+/** A single uncovered cell is 300 m across; without a cap, fitting it would slam to full zoom. */
+private const val FIT_MAX_ZOOM = 16.0

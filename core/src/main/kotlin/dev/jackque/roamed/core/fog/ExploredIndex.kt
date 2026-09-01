@@ -1,6 +1,7 @@
 package dev.jackque.roamed.core.fog
 
 import dev.jackque.roamed.core.geo.CellKey
+import dev.jackque.roamed.core.geo.GeoBounds
 import dev.jackque.roamed.core.geo.RevealZoom
 import dev.jackque.roamed.core.geo.TileMath
 
@@ -56,6 +57,64 @@ class ExploredIndex(private val zoom: Int = RevealZoom.Z) {
     }
 
     fun snapshotKeys(): LongArray = synchronized(lock) { all.toLongArray() }
+
+    /**
+     * The smallest box containing everything uncovered, or null if nothing is.
+     *
+     * The east-west edges are not simply the smallest and largest columns. Someone who has been to
+     * Tokyo and to San Francisco has cells near both ends of the grid, and taking the min and max
+     * would return a box spanning almost the entire planet - the long way round, across Europe
+     * they have never visited. So instead the widest empty stretch of longitude is found and the
+     * box is everything *except* that stretch, which for that traveller correctly wraps across the
+     * Pacific.
+     *
+     * Latitude needs none of this: the grid does not wrap north to south.
+     *
+     * The one case this gets wrong is genuinely covering more than half the world's longitudes, at
+     * which point the widest gap falls inside the explored area rather than outside it. Fitting the
+     * map slightly too wide for someone that well travelled is a good trade for handling the
+     * Pacific correctly.
+     */
+    fun bounds(): GeoBounds? = synchronized(lock) {
+        if (all.isEmpty()) return null
+
+        var minRow = Int.MAX_VALUE
+        var maxRow = Int.MIN_VALUE
+        val columns = HashSet<Int>()
+        for (key in all) {
+            val row = CellKey.y(key)
+            if (row < minRow) minRow = row
+            if (row > maxRow) maxRow = row
+            columns.add(CellKey.x(key))
+        }
+
+        val sorted = columns.toIntArray()
+        sorted.sort()
+        val grid = TileMath.gridSize(zoom)
+
+        // Start with the gap that wraps from the last column back round to the first. Comparing
+        // strictly greater than keeps this one on ties, so an ordinary spread of cells yields an
+        // ordinary non-wrapping box.
+        var widestGapAt = sorted.size - 1
+        var widestGap = (sorted[0] + grid) - sorted[sorted.size - 1]
+        for (i in 0 until sorted.size - 1) {
+            val gap = sorted[i + 1] - sorted[i]
+            if (gap > widestGap) {
+                widestGap = gap
+                widestGapAt = i
+            }
+        }
+        // The box runs from just after the gap, eastward, round to just before it.
+        val westColumn = sorted[(widestGapAt + 1) % sorted.size]
+        val eastColumn = sorted[widestGapAt]
+
+        return GeoBounds(
+            north = TileMath.tileYToLat(minRow.toDouble(), zoom),
+            south = TileMath.tileYToLat((maxRow + 1).toDouble(), zoom),
+            west = TileMath.tileXToLon(westColumn.toDouble(), zoom),
+            east = TileMath.tileXToLon((eastColumn + 1).toDouble(), zoom),
+        )
+    }
 
     /**
      * Cells overlapping the given cell-range, re-keyed to [renderZoom], each with a count of how

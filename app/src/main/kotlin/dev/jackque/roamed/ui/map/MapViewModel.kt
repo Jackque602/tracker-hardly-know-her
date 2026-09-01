@@ -6,10 +6,12 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.jackque.roamed.AppContainer
 import dev.jackque.roamed.core.fog.ExploredIndex
+import dev.jackque.roamed.core.geo.GeoBounds
 import dev.jackque.roamed.data.repo.ExplorationRepository
 import dev.jackque.roamed.data.repo.FogState
 import dev.jackque.roamed.data.repo.RoamedSettings
 import dev.jackque.roamed.data.repo.SettingsRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -20,6 +22,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MapViewModel(
     private val exploration: ExplorationRepository,
@@ -60,6 +63,14 @@ class MapViewModel(
     fun setTracking(enabled: Boolean) {
         viewModelScope.launch { settingsRepository.setTrackingEnabled(enabled) }
     }
+
+    /**
+     * The box enclosing everything uncovered, for the fit-to-explored button.
+     *
+     * Off the main thread because it walks every stored cell, and someone with years of tracking
+     * has hundreds of thousands of them - not slow, but not worth a dropped frame either.
+     */
+    suspend fun exploredBounds(): GeoBounds? = withContext(Dispatchers.Default) { index.bounds() }
 
     private suspend fun loadTrail(): List<TrailPoint> {
         val since = System.currentTimeMillis() - TRAIL_WINDOW_MILLIS

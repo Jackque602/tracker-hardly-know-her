@@ -13,6 +13,9 @@ are for map tiles and (optionally) naming the countries you pass through.
 - **Background tracking.** A foreground service keeps a location subscription alive with the screen
   off, and restarts itself after a reboot. The persistent notification shows how much you have
   uncovered and can stop tracking without opening the app.
+- **Fit to everything.** One button frames the whole of what you have uncovered. It handles the
+  antimeridian properly: if you have been to both Tokyo and San Francisco it wraps across the
+  Pacific rather than zooming out to the whole planet the long way round.
 - **Honest numbers.** Uncovered area in km², percentage of Earth's land and of the whole planet,
   distance travelled, days out, countries and regions visited, and how much new ground you broke
   each year.
