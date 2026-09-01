@@ -179,20 +179,28 @@ class FogOverlay(private val index: ExploredIndex) : Overlay() {
         val cy = scratchPoint.y.toFloat()
 
         currentAccuracyMeters?.let { accuracy ->
-            val metersPerPixel = TileMath.cellWidthMeters(
+            val cellWidthMeters = TileMath.cellWidthMeters(
                 TileMath.cellY(position.latitude, RevealZoom.Z), RevealZoom.Z,
-            ) / pixelsPerCell(projection, position)
-            if (metersPerPixel > 0f) {
-                val radiusPx = accuracy / metersPerPixel
-                if (radiusPx in 1f..2_000f) canvas.drawCircle(cx, cy, radiusPx, positionHaloPaint)
+            )
+            val metersPerPixel = cellWidthMeters / pixelsPerCell(projection, position)
+            if (metersPerPixel > 0.0) {
+                val radiusPx = (accuracy / metersPerPixel).toFloat()
+                if (radiusPx in MIN_HALO_PX..MAX_HALO_PX) {
+                    canvas.drawCircle(cx, cy, radiusPx, positionHaloPaint)
+                }
             }
         }
         canvas.drawCircle(cx, cy, POSITION_RADIUS_PX, positionPaint)
         canvas.drawCircle(cx, cy, POSITION_RADIUS_PX, positionRingPaint)
     }
 
-    /** Screen width of one storage cell at this position, used to size the accuracy halo. */
-    private fun pixelsPerCell(projection: Projection, position: TrailPoint): Float {
+    /**
+     * Screen width of one storage cell at this position, used to size the accuracy halo.
+     *
+     * Note this clobbers [scratchPoint], so callers must have read anything they still need out of
+     * it first.
+     */
+    private fun pixelsPerCell(projection: Projection, position: TrailPoint): Double {
         val z = RevealZoom.Z
         val x = TileMath.cellX(position.longitude, z)
         val y = TileMath.cellY(position.latitude, z)
@@ -204,13 +212,15 @@ class FogOverlay(private val index: ExploredIndex) : Overlay() {
             TileMath.tileXToLon((x + 1).toDouble(), z),
         )
         projection.toPixels(scratchGeo, scratchPoint)
-        val width = (scratchPoint.x - left).toFloat()
-        return if (width > 0.01f) width else 0.01f
+        val width = (scratchPoint.x - left).toDouble()
+        return if (width > 0.01) width else 0.01
     }
 
     private companion object {
         const val DETAIL_LEVELS = 3
         const val SEAM_OVERLAP_PX = 0.5f
         const val POSITION_RADIUS_PX = 11f
+        const val MIN_HALO_PX = 1f
+        const val MAX_HALO_PX = 2_000f
     }
 }

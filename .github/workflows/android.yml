@@ -26,12 +26,14 @@ jobs:
       - name: Unit tests
         run: ./gradlew :core:test --stacktrace
 
+      # Before lint: lint runs with continue-on-error, so a compilation failure there would be
+      # reported as a green step. The APK build is what must actually fail the job.
+      - name: Build debug APK
+        run: ./gradlew :app:assembleDebug --stacktrace
+
       - name: Lint
         run: ./gradlew :app:lintDebug --stacktrace
         continue-on-error: true
-
-      - name: Build debug APK
-        run: ./gradlew :app:assembleDebug --stacktrace
 
       - name: Build release APK
         run: ./gradlew :app:assembleRelease --stacktrace
