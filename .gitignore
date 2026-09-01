@@ -10,5 +10,9 @@ build/
 local.properties
 *.apk
 *.aab
+# Signing material must never be committed - this repository is public, and anyone holding the
+# release key could publish an update that installs over a real one.
 *.keystore
-!debug.keystore
+*.jks
+*.p12
+keystore.properties

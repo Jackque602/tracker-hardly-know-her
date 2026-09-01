@@ -31,6 +31,62 @@ To build locally you need the Android SDK (API 35) and JDK 17+:
 ./gradlew :core:test                # the maths, no device needed
 ```
 
+## Signing — read this before installing
+
+Android identifies an installed app by the key it was signed with. Two builds signed with
+different keys cannot replace one another: the second refuses to install, and the only way
+forward is to uninstall the first — **which deletes the database and every cell you have
+uncovered.** So the release key has to be one stable key that outlives any single build machine.
+
+Without the secrets below, the release APK falls back to the local debug keystore. That keystore
+is generated per machine, so every CI run produces a *different* key and none of those builds can
+update another. Those builds are marked `-unstablesigning` in their version name, and the workflow
+prints a warning.
+
+### One-time setup
+
+Generate a key and keep it somewhere safe — losing it means never being able to update the app
+again without uninstalling:
+
+```bash
+keytool -genkeypair -v -keystore roamed-release.jks \
+  -alias roamed -keyalg RSA -keysize 4096 -validity 10000
+base64 -w0 roamed-release.jks    # macOS: base64 -i roamed-release.jks
+```
+
+Add four repository secrets under **Settings → Secrets and variables → Actions**:
+
+| Secret | Value |
+| --- | --- |
+| `ROAMED_KEYSTORE_BASE64` | the base64 blob printed above |
+| `ROAMED_KEYSTORE_PASSWORD` | keystore password |
+| `ROAMED_KEY_ALIAS` | `roamed` |
+| `ROAMED_KEY_PASSWORD` | key password (same as the keystore unless you set another) |
+
+The keystore never enters this repository — it is a public repo, and anyone holding the key could
+build an APK that installs over yours as a legitimate update. `.gitignore` blocks `*.jks`,
+`*.keystore`, `*.p12` and `keystore.properties` to keep that accidental commit from happening.
+
+### Switching over from an unsigned-key build
+
+Anything already installed from an earlier build carries a throwaway key, so the first properly
+signed build **will not install over it**. Once, and only once:
+
+1. Settings → Export backup in the app, and save the file somewhere off the phone.
+2. Uninstall Roamed.
+3. Install the new release APK.
+4. Settings → Import backup.
+
+Every update after that installs cleanly over the last. Each CI build also gets a `versionCode`
+from the workflow run number, so updates are never refused as a downgrade.
+
+To confirm two builds really do match, the **Report signing certificate** step in each CI run
+prints the certificate SHA-256; it must be identical from one run to the next. Locally:
+
+```bash
+apksigner verify --print-certs app/build/outputs/apk/release/app-release.apk
+```
+
 ## How the fog actually works
 
 The world is divided using the standard Web-Mercator tile grid at **zoom 17** — about 305 m across
