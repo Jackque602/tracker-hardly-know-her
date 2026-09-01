@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- A globe with a slice of it uncovered. -->
+    <path
+        android:fillColor="#FF7FD1C1"
+        android:pathData="M54,26 A28,28 0 1,0 54,82 A28,28 0 1,0 54,26 Z M54,32 A22,22 0 1,1 54,76 A22,22 0 1,1 54,32 Z" />
+    <path
+        android:fillColor="#FFFFC46B"
+        android:pathData="M54,32 A22,22 0 0,1 76,54 L54,54 Z" />
+    <path
+        android:fillColor="#FF7FD1C1"
+        android:pathData="M32,52 L76,52 L76,56 L32,56 Z" />
+    <path
+        android:fillColor="#FF7FD1C1"
+        android:pathData="M54,26 C44,38 44,70 54,82 C64,70 64,38 54,26 Z M54,36 C50,44 50,64 54,72 C58,64 58,44 54,36 Z" />
+</vector>

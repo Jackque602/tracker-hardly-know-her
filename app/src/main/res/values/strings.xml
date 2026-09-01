@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Roamed</string>
+
+    <string name="tab_map">Map</string>
+    <string name="tab_stats">Stats</string>
+    <string name="tab_settings">Settings</string>
+
+    <string name="notification_channel_tracking">Tracking</string>
+    <string name="notification_channel_tracking_description">Shown while Roamed is recording where you go.</string>
+    <string name="notification_tracking_title">Uncovering the map</string>
+    <string name="notification_stop">Stop</string>
+    <string name="notification_waiting">Waiting for a location fix…</string>
+    <string name="notification_summary">%1$s uncovered · %2$s of Earth\'s land</string>
+</resources>

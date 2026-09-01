@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Back up the fog and the settings; the tile cache can always be re-downloaded. -->
+<full-backup-content>
+    <include domain="database" path="roamed.db" />
+    <include domain="file" path="datastore" />
+</full-backup-content>
