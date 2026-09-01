@@ -23,7 +23,7 @@ class ExploredIndex(private val zoom: Int = RevealZoom.Z) {
     private val lock = Any()
     private val all = HashSet<Long>()
     private val buckets = HashMap<Long, MutableSet<Long>>()
-    private val coarseCache = arrayOfNulls<HashMap<Long, Int>>(BUCKET_ZOOM + 1)
+    private val coarseCache = arrayOfNulls<HashSet<Long>>(BUCKET_ZOOM + 1)
     private val rowAreaCache = HashMap<Int, Double>()
 
     /** Bumped on every change so observers can tell whether a redraw is needed. */
@@ -117,29 +117,28 @@ class ExploredIndex(private val zoom: Int = RevealZoom.Z) {
     }
 
     /**
-     * Cells overlapping the given cell-range, re-keyed to [renderZoom], each with a count of how
-     * many stored cells it stands for.
+     * Cells overlapping the given cell-range, re-keyed to [renderZoom].
      *
      * [xFrom]/[xTo] are expressed at [renderZoom] and may run past the grid edge; they are wrapped
      * around the antimeridian so a viewport straddling it still draws correctly.
      */
-    fun cellsIn(renderZoom: Int, xFrom: Int, xTo: Int, yFrom: Int, yTo: Int): CellBatch {
+    fun cellsIn(renderZoom: Int, xFrom: Int, xTo: Int, yFrom: Int, yTo: Int): LongArray {
         require(renderZoom in 0..zoom) { "renderZoom out of range: $renderZoom" }
         synchronized(lock) {
             val grid = TileMath.gridSize(renderZoom)
             val yLo = yFrom.coerceIn(0, grid - 1)
             val yHi = yTo.coerceIn(0, grid - 1)
-            if (yLo > yHi || all.isEmpty()) return CellBatch.EMPTY
+            if (yLo > yHi || all.isEmpty()) return LongArray(0)
 
             val wholeWorldX = xTo - xFrom + 1 >= grid
-            val result = HashMap<Long, Int>()
+            val result = HashSet<Long>()
 
             if (renderZoom <= BUCKET_ZOOM) {
-                for ((key, count) in coarseCountsLocked(renderZoom)) {
+                for (key in coarseSetLocked(renderZoom)) {
                     val y = CellKey.y(key)
                     if (y < yLo || y > yHi) continue
                     if (!wholeWorldX && !xInRange(CellKey.x(key), xFrom, xTo, grid)) continue
-                    result[key] = count
+                    result.add(key)
                 }
             } else {
                 val shift = renderZoom - BUCKET_ZOOM
@@ -157,22 +156,12 @@ class ExploredIndex(private val zoom: Int = RevealZoom.Z) {
                             val y = CellKey.y(key)
                             if (y < yLo || y > yHi) continue
                             if (!wholeWorldX && !xInRange(CellKey.x(key), xFrom, xTo, grid)) continue
-                            result[key] = (result[key] ?: 0) + 1
+                            result.add(key)
                         }
                     }
                 }
             }
-
-            if (result.isEmpty()) return CellBatch.EMPTY
-            val keys = LongArray(result.size)
-            val counts = IntArray(result.size)
-            var i = 0
-            for ((key, count) in result) {
-                keys[i] = key
-                counts[i] = count
-                i++
-            }
-            return CellBatch(keys, counts, renderZoom, zoom)
+            return result.toLongArray()
         }
     }
 
@@ -181,22 +170,17 @@ class ExploredIndex(private val zoom: Int = RevealZoom.Z) {
         val bucketKey = CellKey.toZoom(key, zoom, BUCKET_ZOOM)
         buckets.getOrPut(bucketKey) { HashSet() }.add(key)
         for (z in 0..BUCKET_ZOOM) {
-            val cache = coarseCache[z] ?: continue
-            val coarseKey = CellKey.toZoom(key, zoom, z)
-            cache[coarseKey] = (cache[coarseKey] ?: 0) + 1
+            coarseCache[z]?.add(CellKey.toZoom(key, zoom, z))
         }
         areaSquareMeters += rowArea(CellKey.y(key))
         version++
         return true
     }
 
-    private fun coarseCountsLocked(renderZoom: Int): HashMap<Long, Int> {
+    private fun coarseSetLocked(renderZoom: Int): HashSet<Long> {
         coarseCache[renderZoom]?.let { return it }
-        val built = HashMap<Long, Int>()
-        for (key in all) {
-            val coarseKey = CellKey.toZoom(key, zoom, renderZoom)
-            built[coarseKey] = (built[coarseKey] ?: 0) + 1
-        }
+        val built = HashSet<Long>()
+        for (key in all) built.add(CellKey.toZoom(key, zoom, renderZoom))
         coarseCache[renderZoom] = built
         return built
     }

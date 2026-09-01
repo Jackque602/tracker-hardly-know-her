@@ -7,8 +7,6 @@ import android.graphics.Path
 import android.graphics.Point
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
-import dev.jackque.roamed.core.fog.CellBatch
-import dev.jackque.roamed.core.fog.Coverage
 import dev.jackque.roamed.core.fog.ExploredIndex
 import dev.jackque.roamed.core.geo.CellKey
 import dev.jackque.roamed.core.geo.RevealZoom
@@ -17,9 +15,9 @@ import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.Projection
 import org.osmdroid.views.overlay.Overlay
-import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.min
+import kotlin.math.pow
 
 /** A point on the recorded trail, in the form the overlay wants to draw it. */
 data class TrailPoint(val latitude: Double, val longitude: Double)
@@ -30,6 +28,10 @@ data class TrailPoint(val latitude: Double, val longitude: Double)
  * The whole effect is one `saveLayer`: fill the layer with fog, then punch the explored cells out
  * with a CLEAR paint. Drawing the holes rather than the fog is what keeps it cheap - there are
  * always far fewer explored cells on screen than there are pixels to cover.
+ *
+ * Cells are drawn at their true size on the ground, so the cleared area shrinks as you zoom out
+ * exactly like every other feature on the map. A city you have walked stays city-shaped at every
+ * zoom instead of swelling into a square the size of a county.
  */
 class FogOverlay(private val index: ExploredIndex) : Overlay() {
 
@@ -43,14 +45,8 @@ class FogOverlay(private val index: ExploredIndex) : Overlay() {
 
     private val fogPaintColor: Int get() = Color.argb((opacity * 255f).toInt().coerceIn(0, 255), 8, 13, 22)
 
-    /**
-     * DST_OUT rather than CLEAR: CLEAR discards the source entirely and always erases fully, so
-     * there would be no way to rub the fog only part of the way off. DST_OUT keeps `dst * (1 -
-     * srcAlpha)`, which is exactly the partial erase a half-explored square needs.
-     */
-    private val erasePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.BLACK
-        xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
+    private val clearPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
     }
     private val edgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -79,83 +75,71 @@ class FogOverlay(private val index: ExploredIndex) : Overlay() {
     }
 
     /**
-     * One path per opacity step. Squares are bucketed by how explored they are and each bucket is
-     * stroked in a single pass, because overlapping rectangles inside one path fill once, while
-     * erasing them individually would double-erase every shared edge into a visible grid.
+     * Every visible cell goes into one path and is erased in a single pass. Overlapping rectangles
+     * inside one path fill once, whereas erasing them one at a time would double-erase every
+     * shared edge into a visible grid.
      */
-    private val bucketPaths = Array(ALPHA_BUCKETS) { Path() }
-    private val outlinePath = Path()
+    private val fogPath = Path()
     private val trailPath = Path()
     private val scratchPoint = Point()
     private val scratchGeo = GeoPoint(0.0, 0.0)
 
     /** Remembers which cells were last resolved, so panning does not re-query on every frame. */
-    private var cachedCells: CellBatch = CellBatch.EMPTY
+    private var cachedCells: LongArray = LongArray(0)
+    private var cachedZoom: Int = RevealZoom.Z
     private var cacheSignature: String? = null
 
     override fun draw(canvas: Canvas, mapView: MapView, shadow: Boolean) {
         if (shadow) return
         val projection = mapView.projection
-        val renderZoom = renderZoomFor(mapView.zoomLevelDouble)
 
-        buildFogPaths(projection, renderZoom)
+        buildFogPath(projection, mapView.zoomLevelDouble)
 
-        // Fog first, in its own layer, so the erase only touches fog and not the map beneath it.
+        // Fog first, in its own layer, so CLEAR only erases the fog and not the map beneath it.
         val layer = canvas.saveLayer(null, null)
         canvas.drawColor(fogPaintColor)
-        for (bucket in 0 until ALPHA_BUCKETS) {
-            val path = bucketPaths[bucket]
-            if (path.isEmpty) continue
-            erasePaint.alpha = ((bucket + 1).toFloat() / ALPHA_BUCKETS * 255f).toInt().coerceIn(0, 255)
-            canvas.drawPath(path, erasePaint)
-        }
+        canvas.drawPath(fogPath, clearPaint)
         canvas.restoreToCount(layer)
-        // The outline traces everywhere you have been; the fill says how thoroughly.
-        canvas.drawPath(outlinePath, edgePaint)
+        canvas.drawPath(fogPath, edgePaint)
 
         if (showTrail) drawTrail(canvas, projection)
         drawCurrentPosition(canvas, projection)
     }
 
     /**
-     * How finely to draw the fog at this map zoom.
+     * The finest zoom worth drawing at, which is the storage zoom until the cells get too small to
+     * see.
      *
-     * Cells are stored at z17. Drawing every one of them while looking at a whole continent would
-     * mean hundreds of thousands of one-pixel rectangles, so the index collapses them to a coarser
-     * grid as you zoom out. Three levels finer than the map keeps each drawn square around 32 px:
-     * detailed enough to read as a shape, cheap enough to keep panning smooth.
+     * A map tile is 256 px, so a cell at `renderZoom` covers `256 / 2^(renderZoom - mapZoom)`
+     * pixels on screen. Seven levels finer than the map is where that reaches about two pixels;
+     * past that the cells are smaller than a pixel and collapsing them changes nothing visible.
+     * Below map zoom 10 this is what applies, and above it the fog is drawn at full z17 detail.
      */
-    private fun renderZoomFor(mapZoom: Double): Int =
-        min(RevealZoom.Z, floor(mapZoom).toInt() + DETAIL_LEVELS).coerceIn(0, RevealZoom.Z)
+    private fun idealRenderZoom(mapZoom: Double): Int =
+        min(RevealZoom.Z, floor(mapZoom).toInt() + LEVELS_BELOW_MAP).coerceIn(0, RevealZoom.Z)
 
-    private fun buildFogPaths(projection: Projection, renderZoom: Int) {
-        val box = projection.boundingBox
-        val grid = TileMath.gridSize(renderZoom)
+    /** Screen width of one cell at this render zoom, in pixels. */
+    private fun cellPixelSize(mapZoom: Double, renderZoom: Int): Float =
+        (TILE_SIZE_PX * 2.0.pow(mapZoom - renderZoom)).toFloat()
 
-        val yFrom = TileMath.cellY(box.latNorth, renderZoom) - 1
-        val yTo = TileMath.cellY(box.latSouth, renderZoom) + 1
-        var xFrom = floor(TileMath.lonToTileX(box.lonWest, renderZoom)).toInt() - 1
-        var xTo = floor(TileMath.lonToTileX(box.lonEast, renderZoom)).toInt() + 1
-        // A viewport straddling the antimeridian reports east < west; unwrap it.
-        if (xTo < xFrom) xTo += grid
-        if (xTo - xFrom > grid) {
-            xFrom = 0
-            xTo = grid - 1
-        }
-
-        val signature = "$renderZoom:$xFrom:$xTo:$yFrom:$yTo:${index.version}"
+    private fun buildFogPath(projection: Projection, mapZoom: Double) {
+        val ideal = idealRenderZoom(mapZoom)
+        val signature = "${projection.boundingBox}:$ideal:${index.version}"
         if (signature != cacheSignature) {
-            cachedCells = index.cellsIn(renderZoom, xFrom, xTo, yFrom, yTo)
+            resolveCells(projection, ideal)
             cacheSignature = signature
         }
 
-        bucketPaths.forEach { it.rewind() }
-        outlinePath.rewind()
+        fogPath.rewind()
         val cells = cachedCells
-        if (cells.isEmpty) return
+        if (cells.isEmpty()) return
 
-        for (i in 0 until cells.size) {
-            val key = cells.keys[i]
+        val renderZoom = cachedZoom
+        // Half a pixel of overlap hides hairline seams between neighbours, but on a two-pixel cell
+        // that would be a quarter of its width, so it is scaled down with the cells.
+        val overlap = min(SEAM_OVERLAP_PX, cellPixelSize(mapZoom, renderZoom) * 0.15f)
+
+        for (key in cells) {
             val x = CellKey.x(key)
             val y = CellKey.y(key)
             scratchGeo.setCoords(
@@ -171,32 +155,46 @@ class FogOverlay(private val index: ExploredIndex) : Overlay() {
                 TileMath.tileXToLon((x + 1).toDouble(), renderZoom),
             )
             projection.toPixels(scratchGeo, scratchPoint)
-            var right = scratchPoint.x.toFloat()
-            var bottom = scratchPoint.y.toFloat()
-            if (right < left || bottom < top) continue
+            val right = scratchPoint.x.toFloat() + overlap
+            val bottom = scratchPoint.y.toFloat() + overlap
 
-            val bucket = bucketFor(cells.coverageAt(i))
-            // Overlap hides the hairline seams between neighbours, but only where the erase is
-            // total - at partial alpha an overlap would erase twice and draw a brighter grid.
-            if (bucket == ALPHA_BUCKETS - 1) {
-                right += SEAM_OVERLAP_PX
-                bottom += SEAM_OVERLAP_PX
-            }
-            bucketPaths[bucket].addRect(left, top, right, bottom, Path.Direction.CW)
-            outlinePath.addRect(left, top, right, bottom, Path.Direction.CW)
+            if (right < left || bottom < top) continue
+            fogPath.addRect(left, top, right, bottom, Path.Direction.CW)
         }
     }
 
     /**
-     * Which opacity step a square belongs in.
+     * Fetches the visible cells, coarsening only if there are more of them than can be drawn in a
+     * frame.
      *
-     * Quantising to a handful of steps is what lets the whole viewport be erased in a few draw
-     * calls instead of one per square.
+     * The budget almost never bites: it takes tens of thousands of cells in one viewport, which
+     * means an area so densely covered that a coarser square is nearly full anyway. Coarsening
+     * there costs a pixel or two of accuracy and saves the frame rate.
      */
-    private fun bucketFor(coverage: Double): Int {
-        val alpha = Coverage.alpha(coverage)
-        val bucket = ceil(alpha * ALPHA_BUCKETS).toInt() - 1
-        return bucket.coerceIn(0, ALPHA_BUCKETS - 1)
+    private fun resolveCells(projection: Projection, idealZoom: Int) {
+        var renderZoom = idealZoom
+        while (true) {
+            val grid = TileMath.gridSize(renderZoom)
+            val box = projection.boundingBox
+            val yFrom = TileMath.cellY(box.latNorth, renderZoom) - 1
+            val yTo = TileMath.cellY(box.latSouth, renderZoom) + 1
+            var xFrom = floor(TileMath.lonToTileX(box.lonWest, renderZoom)).toInt() - 1
+            var xTo = floor(TileMath.lonToTileX(box.lonEast, renderZoom)).toInt() + 1
+            // A viewport straddling the antimeridian reports east < west; unwrap it.
+            if (xTo < xFrom) xTo += grid
+            if (xTo - xFrom > grid) {
+                xFrom = 0
+                xTo = grid - 1
+            }
+
+            val found = index.cellsIn(renderZoom, xFrom, xTo, yFrom, yTo)
+            if (found.size <= MAX_CELLS_PER_FRAME || renderZoom == 0) {
+                cachedCells = found
+                cachedZoom = renderZoom
+                return
+            }
+            renderZoom--
+        }
     }
 
     private fun drawTrail(canvas: Canvas, projection: Projection) {
@@ -260,10 +258,15 @@ class FogOverlay(private val index: ExploredIndex) : Overlay() {
     }
 
     private companion object {
-        const val DETAIL_LEVELS = 3
+        /** Web Mercator map tiles are 256 px square. */
+        const val TILE_SIZE_PX = 256.0
 
-        /** Opacity steps the fog is erased in. More is smoother; each one costs a draw call. */
-        const val ALPHA_BUCKETS = 8
+        /** 2^7 = 128, so 256 px / 128 is the ~2 px floor below which cells stop being visible. */
+        const val LEVELS_BELOW_MAP = 7
+
+        /** Above this many rectangles in one viewport, drop a level rather than drop frames. */
+        const val MAX_CELLS_PER_FRAME = 12_000
+
         const val SEAM_OVERLAP_PX = 0.5f
         const val POSITION_RADIUS_PX = 11f
         const val MIN_HALO_PX = 1f
