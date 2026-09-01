@@ -62,7 +62,7 @@ class ExploredIndexTest {
         val outside = CellKey.pack(70_500, 45_000)
         index.addAll(listOf(inside, outside))
         val found = index.cellsIn(RevealZoom.Z, 69_990, 70_010, 44_990, 45_010)
-        assertEquals(listOf(inside), found.toList())
+        assertEquals(listOf(inside), found.keys.toList())
     }
 
     @Test
@@ -73,8 +73,9 @@ class ExploredIndexTest {
         val shift = RevealZoom.Z - renderZoom
         val found = index.cellsIn(renderZoom, 0, TileMath.gridSize(renderZoom) - 1, 0, TileMath.gridSize(renderZoom) - 1)
         val expected = (0 until 64).map { CellKey.pack((70_000 + it) shr shift, 45_000 shr shift) }.toSet()
-        assertEquals(expected, found.toSet())
+        assertEquals(expected, found.keys.toSet())
         assertTrue(found.size < 64, "64 adjacent z17 cells should collapse at z8, got ${found.size}")
+        assertEquals(64, found.childCounts.sum(), "collapsing must not lose any stored cell")
     }
 
     @Test
@@ -97,7 +98,7 @@ class ExploredIndexTest {
         val west = CellKey.pack(maxX, 1000)
         val east = CellKey.pack(0, 1000)
         index.addAll(listOf(west, east))
-        val found = index.cellsIn(z, maxX - 5, maxX + 5, 990, 1010).toSet()
+        val found = index.cellsIn(z, maxX - 5, maxX + 5, 990, 1010).keys.toSet()
         assertTrue(found.contains(west), "cell at the eastern grid edge should be found")
         assertTrue(found.contains(east), "wrapped cell should be found")
     }
@@ -130,5 +131,54 @@ class ExploredIndexTest {
         val grid = TileMath.gridSize(4)
         val found = index.cellsIn(4, 0, grid - 1, 0, grid - 1)
         assertEquals(3, found.size)
+    }
+
+    @Test
+    fun `a collapsed cell reports how many stored cells it stands for`() {
+        val index = ExploredIndex()
+        // Three cells inside one z15 square, one well outside it.
+        index.addAll(
+            listOf(
+                CellKey.pack(70_000, 45_000),
+                CellKey.pack(70_001, 45_000),
+                CellKey.pack(70_000, 45_001),
+                CellKey.pack(90_000, 45_000),
+            ),
+        )
+        val renderZoom = 15
+        val grid = TileMath.gridSize(renderZoom)
+        val found = index.cellsIn(renderZoom, 0, grid - 1, 0, grid - 1)
+        assertEquals(2, found.size)
+
+        val crowded = found.keys.indexOf(CellKey.toZoom(CellKey.pack(70_000, 45_000), RevealZoom.Z, renderZoom))
+        assertTrue(crowded >= 0)
+        assertEquals(3, found.childCounts[crowded])
+        // A z15 square holds 4^2 = 16 cells at z17, so three of them is 3/16.
+        assertEquals(3.0 / 16.0, found.coverageAt(crowded), 1e-9)
+    }
+
+    @Test
+    fun `at the storage zoom every square is fully covered`() {
+        val index = ExploredIndex()
+        index.addAll(listOf(CellKey.pack(70_000, 45_000), CellKey.pack(70_001, 45_000)))
+        val found = index.cellsIn(RevealZoom.Z, 69_990, 70_010, 44_990, 45_010)
+        assertEquals(2, found.size)
+        for (i in 0 until found.size) {
+            assertEquals(1, found.childCounts[i])
+            assertEquals(1.0, found.coverageAt(i), 1e-12, "detailed view must stay fully uncovered")
+        }
+    }
+
+    @Test
+    fun `counts survive cells added after the coarse cache is built`() {
+        val index = ExploredIndex()
+        index.add(CellKey.pack(70_000, 45_000))
+        val renderZoom = 8
+        val grid = TileMath.gridSize(renderZoom)
+        index.cellsIn(renderZoom, 0, grid - 1, 0, grid - 1) // primes the cache
+        index.add(CellKey.pack(70_001, 45_000))
+        val found = index.cellsIn(renderZoom, 0, grid - 1, 0, grid - 1)
+        assertEquals(1, found.size)
+        assertEquals(2, found.childCounts[0], "the cached count must track later additions")
     }
 }

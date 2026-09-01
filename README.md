@@ -69,8 +69,22 @@ Cells are stored at z17, but drawing every one of them while looking at a whole 
 mean hundreds of thousands of sub-pixel rectangles. `ExploredIndex` keeps the set bucketed by z10
 ancestor for zoomed-in queries and memoises collapsed copies for zoomed-out ones, so the overlay
 asks for "cells in this window at this level of detail" and gets back a bounded list either way.
-Zoomed out, neighbouring cells merge into chunky blobs — the same compromise every fog-of-war map
-app makes. The number on the stats screen is the honest one.
+
+Collapsing like that would normally lie to you: at world zoom a single 300 m cell would claim a
+square a thousand kilometres across. So each drawn square also carries a count of how many stored
+cells it actually stands for, and is erased *in proportion* — a region you drove through once
+reads as a smudge, one you have covered thoroughly reads as solid. Two deliberate distortions in
+that curve, both in `Coverage`:
+
+- a **floor**, because a thoroughly explored city is about 0.0001 of a world-zoom square. Scaled
+  honestly it would vanish the moment you zoom out, which is worse than overstating it. Anywhere
+  you have been stays legible.
+- a **gamma**, because the interesting range is the low end; linearly, everything under
+  "half explored" would look identical.
+
+At the storage zoom every square holds exactly one cell, so the coverage is always 1.0 and the
+detailed view is untouched by any of this. The number on the stats screen is unaffected either
+way — area is always summed from the z17 cells.
 
 ## Layout
 

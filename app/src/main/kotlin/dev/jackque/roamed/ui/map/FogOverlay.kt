@@ -7,6 +7,8 @@ import android.graphics.Path
 import android.graphics.Point
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
+import dev.jackque.roamed.core.fog.CellBatch
+import dev.jackque.roamed.core.fog.Coverage
 import dev.jackque.roamed.core.fog.ExploredIndex
 import dev.jackque.roamed.core.geo.CellKey
 import dev.jackque.roamed.core.geo.RevealZoom
@@ -15,6 +17,7 @@ import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.Projection
 import org.osmdroid.views.overlay.Overlay
+import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.min
 
@@ -40,8 +43,14 @@ class FogOverlay(private val index: ExploredIndex) : Overlay() {
 
     private val fogPaintColor: Int get() = Color.argb((opacity * 255f).toInt().coerceIn(0, 255), 8, 13, 22)
 
-    private val clearPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
+    /**
+     * DST_OUT rather than CLEAR: CLEAR discards the source entirely and always erases fully, so
+     * there would be no way to rub the fog only part of the way off. DST_OUT keeps `dst * (1 -
+     * srcAlpha)`, which is exactly the partial erase a half-explored square needs.
+     */
+    private val erasePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.BLACK
+        xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
     }
     private val edgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -69,13 +78,19 @@ class FogOverlay(private val index: ExploredIndex) : Overlay() {
         color = Color.WHITE
     }
 
-    private val fogPath = Path()
+    /**
+     * One path per opacity step. Squares are bucketed by how explored they are and each bucket is
+     * stroked in a single pass, because overlapping rectangles inside one path fill once, while
+     * erasing them individually would double-erase every shared edge into a visible grid.
+     */
+    private val bucketPaths = Array(ALPHA_BUCKETS) { Path() }
+    private val outlinePath = Path()
     private val trailPath = Path()
     private val scratchPoint = Point()
     private val scratchGeo = GeoPoint(0.0, 0.0)
 
     /** Remembers which cells were last resolved, so panning does not re-query on every frame. */
-    private var cachedCells: LongArray = LongArray(0)
+    private var cachedCells: CellBatch = CellBatch.EMPTY
     private var cacheSignature: String? = null
 
     override fun draw(canvas: Canvas, mapView: MapView, shadow: Boolean) {
@@ -83,14 +98,20 @@ class FogOverlay(private val index: ExploredIndex) : Overlay() {
         val projection = mapView.projection
         val renderZoom = renderZoomFor(mapView.zoomLevelDouble)
 
-        buildFogPath(projection, renderZoom)
+        buildFogPaths(projection, renderZoom)
 
-        // Fog first, in its own layer, so CLEAR only erases the fog and not the map beneath it.
+        // Fog first, in its own layer, so the erase only touches fog and not the map beneath it.
         val layer = canvas.saveLayer(null, null)
         canvas.drawColor(fogPaintColor)
-        canvas.drawPath(fogPath, clearPaint)
+        for (bucket in 0 until ALPHA_BUCKETS) {
+            val path = bucketPaths[bucket]
+            if (path.isEmpty) continue
+            erasePaint.alpha = ((bucket + 1).toFloat() / ALPHA_BUCKETS * 255f).toInt().coerceIn(0, 255)
+            canvas.drawPath(path, erasePaint)
+        }
         canvas.restoreToCount(layer)
-        canvas.drawPath(fogPath, edgePaint)
+        // The outline traces everywhere you have been; the fill says how thoroughly.
+        canvas.drawPath(outlinePath, edgePaint)
 
         if (showTrail) drawTrail(canvas, projection)
         drawCurrentPosition(canvas, projection)
@@ -107,7 +128,7 @@ class FogOverlay(private val index: ExploredIndex) : Overlay() {
     private fun renderZoomFor(mapZoom: Double): Int =
         min(RevealZoom.Z, floor(mapZoom).toInt() + DETAIL_LEVELS).coerceIn(0, RevealZoom.Z)
 
-    private fun buildFogPath(projection: Projection, renderZoom: Int) {
+    private fun buildFogPaths(projection: Projection, renderZoom: Int) {
         val box = projection.boundingBox
         val grid = TileMath.gridSize(renderZoom)
 
@@ -128,10 +149,13 @@ class FogOverlay(private val index: ExploredIndex) : Overlay() {
             cacheSignature = signature
         }
 
-        fogPath.rewind()
-        if (cachedCells.isEmpty()) return
+        bucketPaths.forEach { it.rewind() }
+        outlinePath.rewind()
+        val cells = cachedCells
+        if (cells.isEmpty) return
 
-        for (key in cachedCells) {
+        for (i in 0 until cells.size) {
+            val key = cells.keys[i]
             val x = CellKey.x(key)
             val y = CellKey.y(key)
             scratchGeo.setCoords(
@@ -147,13 +171,32 @@ class FogOverlay(private val index: ExploredIndex) : Overlay() {
                 TileMath.tileXToLon((x + 1).toDouble(), renderZoom),
             )
             projection.toPixels(scratchGeo, scratchPoint)
-            // Half a pixel of overlap hides the hairline seams between neighbouring cells.
-            val right = scratchPoint.x.toFloat() + SEAM_OVERLAP_PX
-            val bottom = scratchPoint.y.toFloat() + SEAM_OVERLAP_PX
-
+            var right = scratchPoint.x.toFloat()
+            var bottom = scratchPoint.y.toFloat()
             if (right < left || bottom < top) continue
-            fogPath.addRect(left, top, right, bottom, Path.Direction.CW)
+
+            val bucket = bucketFor(cells.coverageAt(i))
+            // Overlap hides the hairline seams between neighbours, but only where the erase is
+            // total - at partial alpha an overlap would erase twice and draw a brighter grid.
+            if (bucket == ALPHA_BUCKETS - 1) {
+                right += SEAM_OVERLAP_PX
+                bottom += SEAM_OVERLAP_PX
+            }
+            bucketPaths[bucket].addRect(left, top, right, bottom, Path.Direction.CW)
+            outlinePath.addRect(left, top, right, bottom, Path.Direction.CW)
         }
+    }
+
+    /**
+     * Which opacity step a square belongs in.
+     *
+     * Quantising to a handful of steps is what lets the whole viewport be erased in a few draw
+     * calls instead of one per square.
+     */
+    private fun bucketFor(coverage: Double): Int {
+        val alpha = Coverage.alpha(coverage)
+        val bucket = ceil(alpha * ALPHA_BUCKETS).toInt() - 1
+        return bucket.coerceIn(0, ALPHA_BUCKETS - 1)
     }
 
     private fun drawTrail(canvas: Canvas, projection: Projection) {
@@ -218,6 +261,9 @@ class FogOverlay(private val index: ExploredIndex) : Overlay() {
 
     private companion object {
         const val DETAIL_LEVELS = 3
+
+        /** Opacity steps the fog is erased in. More is smoother; each one costs a draw call. */
+        const val ALPHA_BUCKETS = 8
         const val SEAM_OVERLAP_PX = 0.5f
         const val POSITION_RADIUS_PX = 11f
         const val MIN_HALO_PX = 1f
