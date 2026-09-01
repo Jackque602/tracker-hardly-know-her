@@ -62,16 +62,36 @@ jobs:
 
       # Printed on every run so a change of signing key is visible here rather than discovered as
       # a failed install on a phone. This fingerprint must stay identical build to build.
+      #
+      # Every failure path exits non-zero on purpose: a check that can go quiet when it cannot
+      # find the tool or the APK is worse than no check, because it still reports green.
       - name: Report signing certificate
         run: |
-          APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1)
-          if [ -z "$APKSIGNER" ]; then
-            echo "apksigner not found; skipping fingerprint report"
-            exit 0
+          set -euo pipefail
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$sdk" ]; then
+            echo "::error::Neither ANDROID_HOME nor ANDROID_SDK_ROOT is set; cannot locate apksigner."
+            exit 1
           fi
-          for apk in app/build/outputs/apk/release/*.apk; do
+          apksigner=$(find "$sdk/build-tools" -name apksigner -type f 2>/dev/null | sort -V | tail -1)
+          if [ -z "$apksigner" ]; then
+            echo "::error::No apksigner found under $sdk/build-tools."
+            exit 1
+          fi
+          shopt -s nullglob
+          apks=(app/build/outputs/apk/release/*.apk)
+          if [ ${#apks[@]} -eq 0 ]; then
+            echo "::error::No release APK to verify."
+            exit 1
+          fi
+          for apk in "${apks[@]}"; do
             echo "### $apk"
-            "$APKSIGNER" verify --print-certs "$apk" | grep -E "certificate (DN|SHA-256 digest)" || true
+            "$apksigner" verify --print-certs "$apk" | tee /tmp/roamed-certs.txt
+            # A cert digest must actually have been printed, not merely exit 0.
+            grep -q "certificate SHA-256 digest" /tmp/roamed-certs.txt || {
+              echo "::error::apksigner produced no certificate digest for $apk."
+              exit 1
+            }
           done
 
       - name: Delete signing key
