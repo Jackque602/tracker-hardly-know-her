@@ -20,15 +20,20 @@ enum class MapStyle { STANDARD, TOPOGRAPHIC }
  * Defaults are chosen for "leave it on all day and forget about it": a fix every 25 seconds only
  * when you have actually moved 20 metres costs very little battery, and a 120 m reveal radius is
  * generous enough that a walk clears a satisfying stripe without inventing coverage.
+ *
+ * [highAccuracyMode] defaults on because the balanced-power mode targets roughly block-level
+ * accuracy, which it can only reach where there is WiFi to lean on. Out on a rural road it falls
+ * back to cell towers and returns fixes hundreds of metres wide, and an app whose entire job is
+ * recording where you went cannot do that job on fixes like those.
  */
 data class RoamedSettings(
     val trackingEnabled: Boolean = false,
     val updateIntervalSeconds: Int = 25,
     val minDisplacementMeters: Int = 20,
     val revealRadiusMeters: Int = 120,
-    val maxAccuracyMeters: Int = 75,
+    val maxAccuracyMeters: Int = 150,
     val connectTheDots: Boolean = true,
-    val highAccuracyMode: Boolean = false,
+    val highAccuracyMode: Boolean = true,
     val fogOpacity: Float = 0.85f,
     val showTrail: Boolean = false,
     val keepRawFixesDays: Int = 365,

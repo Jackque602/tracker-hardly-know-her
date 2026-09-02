@@ -161,9 +161,9 @@ wrong are the parts that can be tested in a second.
 | --- | --- | --- |
 | Check position every | 25 s | Battery against how finely a fast journey is recorded |
 | Only after moving | 20 m | The radio stays asleep while you sit still |
-| High accuracy | off | Sharper edges, noticeably more battery |
+| Use GPS | on | Off falls back to WiFi and cell towers, which cannot locate you away from towns |
 | Reveal radius | 120 m | How generously a fix uncovers around itself |
-| Ignore fixes worse than | 75 m | Rejecting rubbish fixes against missing indoor ones |
+| Ignore fixes worse than | 150 m | Rejecting rubbish fixes against missing indoor ones |
 | Keep raw fixes for | 365 days | Storage. The uncovered map is kept forever regardless |
 
 ## Permissions

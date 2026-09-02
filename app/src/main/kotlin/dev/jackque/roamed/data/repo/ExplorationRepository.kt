@@ -131,8 +131,12 @@ class ExplorationRepository(
                     }
                     else -> {
                         distance = moved
+                        // Distance alone is not enough: a gap can be short in km but hours long,
+                        // and the road taken over those hours is anyone's guess. Bridge only what
+                        // could plausibly have been driven straight through.
                         joinToPrevious = settings.connectTheDots &&
-                            moved <= FogEngine.DEFAULT_MAX_GAP_METERS
+                            moved <= FogEngine.DEFAULT_MAX_GAP_METERS &&
+                            elapsedSeconds <= MAX_GAP_SECONDS
                     }
                 }
             }
@@ -347,6 +351,9 @@ class ExplorationRepository(
         const val IMPORT_CHUNK = 2_000
         const val RECENT_DAYS = 30
         const val MIN_JITTER_METERS = 10.0
+
+        /** Ten minutes: long enough for a tunnel or a dead zone, short enough to still be one leg. */
+        const val MAX_GAP_SECONDS = 600.0
         const val MILLIS_PER_DAY = 24L * 60L * 60L * 1_000L
     }
 }

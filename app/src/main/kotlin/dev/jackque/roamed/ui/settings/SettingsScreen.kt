@@ -103,8 +103,10 @@ fun SettingsScreen() {
                         onChange = { viewModel.setMinDisplacement(it.roundToInt()) },
                     )
                     SwitchRow(
-                        label = "High accuracy",
-                        description = "Uses GPS aggressively. More precise edges, noticeably more battery.",
+                        label = "Use GPS",
+                        description = "On, positions come from GPS. Off saves battery by using WiFi and " +
+                            "cell towers instead, which is only accurate near towns - away from them " +
+                            "the fixes get too vague to record and your trip goes missing.",
                         checked = settings.highAccuracyMode,
                         onChange = viewModel::setHighAccuracy,
                     )

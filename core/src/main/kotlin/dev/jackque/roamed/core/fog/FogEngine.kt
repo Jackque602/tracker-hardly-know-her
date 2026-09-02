@@ -137,7 +137,16 @@ class FogEngine(private val zoom: Int = RevealZoom.Z) {
     }
 
     companion object {
-        const val DEFAULT_MAX_GAP_METERS = 3_000.0
+        /**
+         * Furthest apart two fixes can be and still have the road between them filled in.
+         *
+         * Three kilometres was far too tight: any dropout - a tunnel, a dead zone, a stretch where
+         * the fixes were too vague to keep - leaves a bigger hole than that, and refusing to
+         * bridge it turns a momentary lapse into a permanent gap in the map. Twenty-five km covers
+         * a realistic dropout while staying far below any flight, which shows up as a gap of
+         * hundreds of km and is still refused.
+         */
+        const val DEFAULT_MAX_GAP_METERS = 25_000.0
         private const val MAX_COLUMNS = 4_096
         private const val MAX_INTERPOLATION_STEPS = 4_000
     }

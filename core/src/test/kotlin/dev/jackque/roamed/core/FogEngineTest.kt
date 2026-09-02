@@ -66,6 +66,19 @@ class FogEngineTest {
     }
 
     @Test
+    fun `a motorway dropout is bridged rather than left as a hole`() {
+        // Ten km between fixes is what a tunnel or a stretch of dead zone leaves behind. The old
+        // three-kilometre limit refused to fill this in, so a lapse of signal became a permanent
+        // hole in the map.
+        val cells = engine.cellsAlongSegment(40.20, -76.80, 40.20, -76.68, radiusMeters = 120.0)
+        val z = RevealZoom.Z
+        val columns = cells.map { CellKey.x(it) }.toSet()
+        for (x in TileMath.cellX(-76.80, z)..TileMath.cellX(-76.68, z)) {
+            assertTrue(columns.contains(x), "column $x is missing from the bridged gap")
+        }
+    }
+
+    @Test
     fun `an implausible gap is not painted in`() {
         // London to New York in one step: nothing between them should be uncovered.
         val cells = engine.cellsAlongSegment(51.5074, -0.1278, 40.7128, -74.0060, radiusMeters = 100.0)
