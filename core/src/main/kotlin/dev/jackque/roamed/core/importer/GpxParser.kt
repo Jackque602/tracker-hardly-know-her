@@ -24,7 +24,8 @@ object GpxParser {
         // A file with no <trkseg> can still hold loose waypoints; treat the whole thing as one run.
         val bodies = segments.ifEmpty { listOf(text) }
         return bodies
-            .map { body -> ImportedTrack(pointsIn(body)) }
+            // GPX says outright that a segment is one path, so its points may always be joined.
+            .map { body -> ImportedTrack(pointsIn(body), contiguous = true) }
             .filterNot { it.isEmpty }
     }
 

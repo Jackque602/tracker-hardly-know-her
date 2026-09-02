@@ -239,7 +239,7 @@ class ExplorationRepository(
                 pointCount++
                 val cells = HashSet<Long>()
                 val from = previous
-                if (from != null && joinable(from, point)) {
+                if (from != null && joinable(from, point, track.contiguous)) {
                     fog.cellsAlongSegment(
                         from.latitude, from.longitude,
                         point.latitude, point.longitude,
@@ -273,9 +273,17 @@ class ExplorationRepository(
         }
     }
 
-    /** The same rule live tracking uses: near enough, and soon enough, to be one continuous leg. */
-    private fun joinable(from: ImportedFix, to: ImportedFix): Boolean {
+    /**
+     * Whether the road between two imported points may be filled in.
+     *
+     * For recorded history this is the same rule live tracking uses: near enough, and soon enough,
+     * to be one continuous leg. A file that declares its points to be a single path is taken at its
+     * word instead, subject only to a sanity limit, because a turn-by-turn route can put fifty
+     * kilometres of motorway between two waypoints and still be one unbroken drive.
+     */
+    private fun joinable(from: ImportedFix, to: ImportedFix, contiguous: Boolean): Boolean {
         val moved = Geo.distanceMeters(from.latitude, from.longitude, to.latitude, to.longitude)
+        if (contiguous) return moved <= CONTIGUOUS_SANITY_LIMIT_METERS
         if (moved > FogEngine.DEFAULT_MAX_GAP_METERS) return false
         val start = from.timestamp
         val end = to.timestamp
@@ -430,6 +438,9 @@ class ExplorationRepository(
 
         /** Ten minutes: long enough for a tunnel or a dead zone, short enough to still be one leg. */
         const val MAX_GAP_SECONDS = 600.0
+
+        /** Only a guard against a corrupt file; a declared path is otherwise trusted. */
+        const val CONTIGUOUS_SANITY_LIMIT_METERS = 500_000.0
         const val MILLIS_PER_DAY = 24L * 60L * 60L * 1_000L
     }
 }

@@ -200,6 +200,25 @@ class TrackImportTest {
     }
 
     @Test
+    fun `gpx segments declare themselves contiguous, timeline groupings do not`() {
+        // A turn-by-turn route export can leave fifty km of motorway between two waypoints. GPX
+        // says a segment is one path, so those must still join; a heuristically grouped JSON array
+        // carries no such promise and keeps the cautious distance rule.
+        val gpx = """
+            <gpx version="1.1"><trk><trkseg>
+              <trkpt lat="39.7391" lon="-75.5398"/>
+              <trkpt lat="40.0379" lon="-76.3055"/>
+            </trkseg></trk></gpx>
+        """.trimIndent()
+        assertTrue(TrackImport.parse(gpx).all { it.contiguous }, "a GPX segment is a declared path")
+
+        val json = """{"locations":[
+            {"latitude":39.7391,"longitude":-75.5398},
+            {"latitude":40.0379,"longitude":-76.3055}]}"""
+        assertTrue(TrackImport.parse(json).none { it.contiguous }, "grouped history is only a guess")
+    }
+
+    @Test
     fun `unreadable files are refused clearly`() {
         assertFailsWith<ImportException> { TrackImport.parse("this is not a track") }
         assertFailsWith<ImportException> { GoogleTimelineParser.parse("{ broken") }
