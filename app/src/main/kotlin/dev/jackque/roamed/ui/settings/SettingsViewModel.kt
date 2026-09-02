@@ -8,6 +8,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.jackque.roamed.AppContainer
 import dev.jackque.roamed.BuildConfig
+import dev.jackque.roamed.core.importer.TrackImport
 import dev.jackque.roamed.data.repo.ExplorationRepository
 import dev.jackque.roamed.data.repo.MapStyle
 import dev.jackque.roamed.data.repo.RoamedSettings
@@ -83,6 +84,37 @@ class SettingsViewModel(
                 onSuccess = { added ->
                     if (added == 0) "Nothing new in that backup - the map already had all of it."
                     else "Added $added squares from the backup."
+                },
+                onFailure = { "Import failed: ${it.message}" },
+            )
+        }
+    }
+
+    /**
+     * Uncovers a trip recorded by something else - a Google Timeline export, or a GPX from any
+     * other tracker - so a journey this app missed is not lost for good.
+     */
+    fun importTracks(uri: Uri) {
+        viewModelScope.launch {
+            _busy.value = true
+            val result = runCatching {
+                val text = withContext(Dispatchers.IO) {
+                    appContext.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                        ?: error("Could not open that file for reading")
+                }
+                val tracks = TrackImport.parse(text)
+                if (tracks.isEmpty()) error("No positions found in that file")
+                exploration.importTracks(tracks, settings.value)
+            }
+            _busy.value = false
+            _message.value = result.fold(
+                onSuccess = { imported ->
+                    if (imported.newCells == 0) {
+                        "Read ${imported.pointCount} positions, but that ground was already uncovered."
+                    } else {
+                        "Uncovered ${imported.newCells} new squares from ${imported.pointCount} " +
+                            "positions across ${imported.trackCount} trips."
+                    }
                 },
                 onFailure = { "Import failed: ${it.message}" },
             )

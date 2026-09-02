@@ -11,6 +11,8 @@ import dev.jackque.roamed.core.geo.CellKey
 import dev.jackque.roamed.core.geo.Geo
 import dev.jackque.roamed.core.geo.RevealZoom
 import dev.jackque.roamed.core.geo.TileMath
+import dev.jackque.roamed.core.importer.ImportedFix
+import dev.jackque.roamed.core.importer.ImportedTrack
 import dev.jackque.roamed.core.model.CellRecord
 import dev.jackque.roamed.core.model.TrackPointRecord
 import dev.jackque.roamed.core.stats.ExplorationStats
@@ -50,6 +52,13 @@ data class FogState(
     val cellCount: Int = 0,
     val areaSquareMeters: Double = 0.0,
     val lastFix: Fix? = null,
+)
+
+/** What an import of someone else's track file actually added. */
+data class TrackImportResult(
+    val trackCount: Int,
+    val pointCount: Int,
+    val newCells: Int,
 )
 
 sealed interface RecordOutcome {
@@ -206,6 +215,73 @@ class ExplorationRepository(
             )
         }
         database.dailyStatDao().addToDay(localDate(now), distanceMeters, freshKeys.size)
+    }
+
+    /**
+     * Uncovers the ground covered by tracks imported from elsewhere - a Google Timeline export, a
+     * GPX from another app - so a trip the tracker missed can still be put on the map.
+     *
+     * The revealing runs before the lock is taken. A year of location history is a lot of points,
+     * and holding the mutex through all of it would stall live tracking for the whole import.
+     */
+    suspend fun importTracks(
+        tracks: List<ImportedTrack>,
+        settings: RoamedSettings,
+    ): TrackImportResult = withContext(io) {
+        val radius = settings.revealRadiusMeters.toDouble()
+        var pointCount = 0
+        // Earliest timestamp wins, so an imported cell is dated when it was actually first crossed.
+        val discovered = HashMap<Long, Long>()
+
+        for (track in tracks) {
+            var previous: ImportedFix? = null
+            for (point in track.points) {
+                pointCount++
+                val cells = HashSet<Long>()
+                val from = previous
+                if (from != null && joinable(from, point)) {
+                    fog.cellsAlongSegment(
+                        from.latitude, from.longitude,
+                        point.latitude, point.longitude,
+                        radiusMeters = radius,
+                        into = cells,
+                    )
+                } else {
+                    fog.cellsWithinRadius(point.latitude, point.longitude, radius, cells)
+                }
+                val stamp = point.timestamp ?: 0L
+                for (cell in cells) {
+                    val existing = discovered[cell]
+                    if (existing == null || (stamp in 1 until existing)) discovered[cell] = stamp
+                }
+                previous = point
+            }
+        }
+
+        mutex.withLock {
+            val fresh = discovered.filterKeys { !index.contains(it) }
+            fresh.entries.chunked(IMPORT_CHUNK).forEach { chunk ->
+                database.exploredCellDao().insertNew(
+                    chunk.map { (key, stamp) ->
+                        ExploredCellEntity(CellKey.x(key), CellKey.y(key), stamp, stamp, visits = 1)
+                    },
+                )
+            }
+            index.addAll(fresh.keys)
+            publish(_state.value.lastFix)
+            TrackImportResult(tracks.size, pointCount, fresh.size)
+        }
+    }
+
+    /** The same rule live tracking uses: near enough, and soon enough, to be one continuous leg. */
+    private fun joinable(from: ImportedFix, to: ImportedFix): Boolean {
+        val moved = Geo.distanceMeters(from.latitude, from.longitude, to.latitude, to.longitude)
+        if (moved > FogEngine.DEFAULT_MAX_GAP_METERS) return false
+        val start = from.timestamp
+        val end = to.timestamp
+        // Without timestamps the file's own ordering is the only evidence there is, so distance decides.
+        if (start == null || end == null) return true
+        return (end - start) / 1000.0 <= MAX_GAP_SECONDS
     }
 
     /** Drops raw fixes older than the retention window. The fog itself is never pruned. */

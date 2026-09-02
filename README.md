@@ -21,6 +21,10 @@ are for map tiles and (optionally) naming the countries you pass through.
   each year.
 - **Your data stays yours.** Export a full backup as JSON, the uncovered area as GeoJSON, or your
   trail as GPX. Import a backup to merge an old phone's map into this one.
+- **Rescue a trip it missed.** Import a Google Maps Timeline export or a GPX from any other
+  tracker, and the ground it covers gets uncovered as if the app had been watching. The Timeline
+  reader is deliberately structural rather than tied to one schema, because Google has changed
+  that file's shape several times.
 
 ## Getting the APK
 

@@ -73,6 +73,9 @@ fun SettingsScreen() {
     val backupImporter = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri -> uri?.let(viewModel::importBackup) }
+    val trackImporter = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri -> uri?.let(viewModel::importTracks) }
 
     Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { padding ->
         LazyColumn(
@@ -210,6 +213,21 @@ fun SettingsScreen() {
                         onClick = { backupImporter.launch(arrayOf("application/json", "*/*")) },
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Import backup") }
+                    OutlinedButton(
+                        onClick = {
+                            trackImporter.launch(
+                                arrayOf("application/json", "application/gpx+xml", "text/xml", "*/*"),
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Uncover a trip from Timeline or GPX") }
+                    Text(
+                        "Fills in a journey this app missed, from a Google Maps Timeline export or " +
+                            "a GPX file from any other tracker.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
                     OutlinedButton(
                         onClick = { geoJsonExporter.launch("roamed-explored.geojson") },
                         modifier = Modifier.fillMaxWidth(),
