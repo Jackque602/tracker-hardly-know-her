@@ -38,10 +38,25 @@ internal object Coordinates {
         return null
     }
 
-    /** ISO-8601 in any of its offsets, or epoch milliseconds as digits. */
+    /**
+     * Rescales a bare epoch to milliseconds.
+     *
+     * Exports disagree about the unit - Life360 and plenty of others count in seconds, Google in
+     * milliseconds - and taking seconds at face value dates the whole trip to 1970, which silently
+     * lands every imported cell outside the years the stats screen knows about. The magnitudes are
+     * far enough apart to tell without ambiguity: a present-day epoch is ~1.8e9 in seconds, ~1.8e12
+     * in milliseconds and ~1.8e15 in microseconds.
+     */
+    private fun normaliseEpoch(raw: Long): Long = when {
+        kotlin.math.abs(raw) < 100_000_000_000L -> raw * 1_000
+        kotlin.math.abs(raw) > 100_000_000_000_000L -> raw / 1_000
+        else -> raw
+    }
+
+    /** ISO-8601 in any of its offsets, or a bare epoch in seconds, milliseconds or microseconds. */
     fun timestamp(value: String?): Long? {
         if (value.isNullOrBlank()) return null
-        value.toLongOrNull()?.let { return it }
+        value.toLongOrNull()?.let { return normaliseEpoch(it) }
         return try {
             OffsetDateTime.parse(value).toInstant().toEpochMilli()
         } catch (e: DateTimeParseException) {

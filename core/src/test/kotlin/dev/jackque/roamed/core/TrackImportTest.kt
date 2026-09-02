@@ -159,6 +159,47 @@ class TrackImportTest {
     }
 
     @Test
+    fun `epochs in seconds are not read as 1970`() {
+        // Life360 and many others count in seconds. Taken at face value the whole trip lands in
+        // 1970 and every imported cell falls outside the years the stats screen knows about.
+        val text = """
+            {"locations":[
+              {"latitude":"39.6639","longitude":"-75.6093","startTimestamp":"1788267600"},
+              {"latitude":"40.1295","longitude":"-77.0155","startTimestamp":"1788271200"}
+            ]}
+        """.trimIndent()
+        val points = allPoints(text)
+        assertEquals(2, points.size)
+        assertEquals(1_788_267_600_000L, points[0].timestamp)
+        assertEquals(1_788_271_200_000L, points[1].timestamp)
+    }
+
+    @Test
+    fun `milliseconds and microseconds are both understood`() {
+        val millis = """{"locations":[
+            {"latitude":39.66,"longitude":-75.60,"timestamp":"1788267600000"},
+            {"latitude":40.12,"longitude":-77.01,"timestamp":"1788271200000"}]}"""
+        assertEquals(1_788_267_600_000L, allPoints(millis)[0].timestamp)
+
+        val micros = """{"locations":[
+            {"latitude":39.66,"longitude":-75.60,"timestamp":"1788267600000000"},
+            {"latitude":40.12,"longitude":-77.01,"timestamp":"1788271200000000"}]}"""
+        assertEquals(1_788_267_600_000L, allPoints(micros)[0].timestamp)
+    }
+
+    @Test
+    fun `string-encoded coordinates are read as numbers`() {
+        // Life360 quotes its numbers; a strict number-only reader would find nothing here.
+        val text = """{"locations":[
+            {"latitude":"39.6639","longitude":"-75.6093"},
+            {"latitude":"40.1295","longitude":"-77.0155"}]}"""
+        val points = allPoints(text)
+        assertEquals(2, points.size)
+        assertEquals(39.6639, points[0].latitude, 1e-9)
+        assertEquals(-75.6093, points[0].longitude, 1e-9)
+    }
+
+    @Test
     fun `unreadable files are refused clearly`() {
         assertFailsWith<ImportException> { TrackImport.parse("this is not a track") }
         assertFailsWith<ImportException> { GoogleTimelineParser.parse("{ broken") }
