@@ -8,7 +8,9 @@ import android.graphics.Point
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import dev.jackque.roamed.core.fog.ExploredIndex
+import dev.jackque.roamed.core.fog.isOneLeg
 import dev.jackque.roamed.core.geo.CellKey
+import dev.jackque.roamed.core.geo.Geo
 import dev.jackque.roamed.core.geo.RevealZoom
 import dev.jackque.roamed.core.geo.TileMath
 import org.osmdroid.util.GeoPoint
@@ -19,8 +21,13 @@ import kotlin.math.floor
 import kotlin.math.min
 import kotlin.math.pow
 
-/** A point on the recorded trail, in the form the overlay wants to draw it. */
-data class TrailPoint(val latitude: Double, val longitude: Double)
+/**
+ * A point on the recorded trail, in the form the overlay wants to draw it.
+ *
+ * The timestamp is what lets the trail tell a journey from a gap. Zero means "not from the record"
+ * - the current position marker, which is never part of a line.
+ */
+data class TrailPoint(val latitude: Double, val longitude: Double, val timestamp: Long = 0L)
 
 /**
  * Paints the unexplored world over the map and cuts your travels out of it.
@@ -197,19 +204,40 @@ class FogOverlay(private val index: ExploredIndex) : Overlay() {
         }
     }
 
+    /**
+     * Draws the recorded trail, broken wherever the record is.
+     *
+     * Joining every stored fix to the next one regardless would draw a straight line across a
+     * stretch where nothing was recorded at all - and that line is a claim about a route that was
+     * never watched. It reads as "the app followed me here", when the truth is the opposite: two
+     * fixes, and no idea what happened between them. So the line breaks on exactly the gaps the fog
+     * refuses to fill, and the trail and the fog then tell the same story.
+     */
     private fun drawTrail(canvas: Canvas, projection: Projection) {
         if (trail.size < 2) return
         trailPath.rewind()
-        trail.forEachIndexed { i, point ->
+        var previous: TrailPoint? = null
+        for (point in trail) {
             scratchGeo.setCoords(point.latitude, point.longitude)
             projection.toPixels(scratchGeo, scratchPoint)
-            if (i == 0) {
-                trailPath.moveTo(scratchPoint.x.toFloat(), scratchPoint.y.toFloat())
+            val x = scratchPoint.x.toFloat()
+            val y = scratchPoint.y.toFloat()
+            val from = previous
+            if (from == null || !continuous(from, point)) {
+                trailPath.moveTo(x, y)
             } else {
-                trailPath.lineTo(scratchPoint.x.toFloat(), scratchPoint.y.toFloat())
+                trailPath.lineTo(x, y)
             }
+            previous = point
         }
         canvas.drawPath(trailPath, trailPaint)
+    }
+
+    private fun continuous(from: TrailPoint, to: TrailPoint): Boolean {
+        // Without times there is nothing to judge a gap by, so the stored order is all there is.
+        if (from.timestamp <= 0L || to.timestamp <= 0L) return true
+        val moved = Geo.distanceMeters(from.latitude, from.longitude, to.latitude, to.longitude)
+        return isOneLeg(moved, (to.timestamp - from.timestamp) / 1000.0)
     }
 
     private fun drawCurrentPosition(canvas: Canvas, projection: Projection) {

@@ -2,6 +2,7 @@ package dev.jackque.roamed.core
 
 import dev.jackque.roamed.core.fog.FogEngine
 import dev.jackque.roamed.core.fog.isImplausibleJump
+import dev.jackque.roamed.core.fog.isOneLeg
 import dev.jackque.roamed.core.geo.CellKey
 import dev.jackque.roamed.core.geo.RevealZoom
 import dev.jackque.roamed.core.geo.TileMath
@@ -126,5 +127,39 @@ class FogEngineTest {
         assertFalse(isImplausibleJump(900_000.0, 3_600.0)) // a plausible flight leg
         assertTrue(isImplausibleJump(500_000.0, 60.0))     // 30,000 km/h
         assertFalse(isImplausibleJump(50.0, 0.01))         // tiny hops are noise, not jumps
+    }
+
+    @Test
+    fun `one leg means near enough and soon enough`() {
+        assertTrue(isOneLeg(1_500.0, 30.0), "a normal step between two fixes")
+        assertTrue(isOneLeg(20_000.0, 590.0), "a long motorway stretch through a dead zone")
+
+        assertFalse(isOneLeg(30_000.0, 60.0), "further than the engine will ever bridge")
+        // The case that leaves a hole in a drive: only eleven km apart, but the tracker was silent
+        // for half an hour, and half an hour is long enough to have gone somewhere else and back.
+        assertFalse(isOneLeg(11_000.0, 1_800.0), "close by, but far too long ago")
+    }
+
+    @Test
+    fun `the fog and the trail break at exactly the same places`() {
+        // The trail overlay draws a line only where this says the ground may be uncovered. If the
+        // two ever disagreed, the map would draw a route across ground it had left fogged.
+        val engine = FogEngine()
+        for ((metres, seconds) in listOf(
+            1_000.0 to 30.0,
+            11_000.0 to 1_800.0,
+            30_000.0 to 60.0,
+            24_000.0 to 599.0,
+        )) {
+            val bridged = engine.cellsAlongSegment(
+                39.9626, -76.7277,
+                39.9626 + metres / 111_320.0, -76.7277,
+                radiusMeters = 120.0,
+            ).isNotEmpty()
+            val wouldDraw = isOneLeg(metres, seconds)
+            if (wouldDraw) {
+                assertTrue(bridged, "the trail would draw ${metres}m but the fog would not fill it")
+            }
+        }
     }
 }

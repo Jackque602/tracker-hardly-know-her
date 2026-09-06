@@ -55,8 +55,9 @@ abstract class TrackPointDao {
     @Insert
     abstract suspend fun insert(point: TrackPointEntity)
 
-    @Query("SELECT * FROM track_point WHERE timestamp >= :since ORDER BY timestamp ASC LIMIT :limit")
-    abstract suspend fun since(since: Long, limit: Int): List<TrackPointEntity>
+    /** Newest first, so a limit keeps the most recent fixes rather than the oldest ones. */
+    @Query("SELECT * FROM track_point WHERE timestamp >= :since ORDER BY timestamp DESC LIMIT :limit")
+    abstract suspend fun newestSince(since: Long, limit: Int): List<TrackPointEntity>
 
     @Query("SELECT * FROM track_point ORDER BY timestamp ASC LIMIT :limit OFFSET :offset")
     abstract suspend fun page(limit: Int, offset: Int): List<TrackPointEntity>

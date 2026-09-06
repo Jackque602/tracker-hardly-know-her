@@ -7,6 +7,7 @@ import dev.jackque.roamed.core.backup.GpxSink
 import dev.jackque.roamed.core.fog.ExploredIndex
 import dev.jackque.roamed.core.fog.FogEngine
 import dev.jackque.roamed.core.fog.isImplausibleJump
+import dev.jackque.roamed.core.fog.isOneLeg
 import dev.jackque.roamed.core.geo.CellKey
 import dev.jackque.roamed.core.geo.Geo
 import dev.jackque.roamed.core.geo.RevealZoom
@@ -140,12 +141,7 @@ class ExplorationRepository(
                     }
                     else -> {
                         distance = moved
-                        // Distance alone is not enough: a gap can be short in km but hours long,
-                        // and the road taken over those hours is anyone's guess. Bridge only what
-                        // could plausibly have been driven straight through.
-                        joinToPrevious = settings.connectTheDots &&
-                            moved <= FogEngine.DEFAULT_MAX_GAP_METERS &&
-                            elapsedSeconds <= MAX_GAP_SECONDS
+                        joinToPrevious = settings.connectTheDots && isOneLeg(moved, elapsedSeconds)
                     }
                 }
             }
@@ -289,7 +285,7 @@ class ExplorationRepository(
         val end = to.timestamp
         // Without timestamps the file's own ordering is the only evidence there is, so distance decides.
         if (start == null || end == null) return true
-        return (end - start) / 1000.0 <= MAX_GAP_SECONDS
+        return isOneLeg(moved, (end - start) / 1000.0)
     }
 
     /** Drops raw fixes older than the retention window. The fog itself is never pruned. */
@@ -299,8 +295,15 @@ class ExplorationRepository(
         database.trackPointDao().deleteOlderThan(cutoff)
     }
 
+    /**
+     * The most recent fixes within the window, oldest first.
+     *
+     * The limit takes the *newest* rows and they are turned back round here. Taking the oldest
+     * instead would mean that on a busy day the trail stopped partway through it and never showed
+     * where you had just been, which is the half anyone looking at a trail actually wants.
+     */
     suspend fun recentTrail(sinceMillis: Long, limit: Int = 2_000): List<TrackPointEntity> =
-        withContext(io) { database.trackPointDao().since(sinceMillis, limit) }
+        withContext(io) { database.trackPointDao().newestSince(sinceMillis, limit).asReversed() }
 
     suspend fun recordPlace(place: VisitedPlaceEntity) = withContext(io) {
         database.visitedPlaceDao().record(place)
@@ -435,9 +438,6 @@ class ExplorationRepository(
         const val IMPORT_CHUNK = 2_000
         const val RECENT_DAYS = 30
         const val MIN_JITTER_METERS = 10.0
-
-        /** Ten minutes: long enough for a tunnel or a dead zone, short enough to still be one leg. */
-        const val MAX_GAP_SECONDS = 600.0
 
         /** Only a guard against a corrupt file; a declared path is otherwise trusted. */
         const val CONTIGUOUS_SANITY_LIMIT_METERS = 500_000.0

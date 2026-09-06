@@ -74,7 +74,7 @@ class MapViewModel(
 
     private suspend fun loadTrail(): List<TrailPoint> {
         val since = System.currentTimeMillis() - TRAIL_WINDOW_MILLIS
-        return exploration.recentTrail(since).map { TrailPoint(it.latitude, it.longitude) }
+        return exploration.recentTrail(since).map { TrailPoint(it.latitude, it.longitude, it.timestamp) }
     }
 
     companion object {

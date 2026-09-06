@@ -158,3 +158,23 @@ const val IMPLAUSIBLE_SPEED_MPS = 305.0
 /** True when moving between two fixes in [seconds] would be physically implausible. */
 fun isImplausibleJump(distanceMeters: Double, seconds: Double): Boolean =
     seconds > 0.0 && distanceMeters / seconds > IMPLAUSIBLE_SPEED_MPS && abs(distanceMeters) > 1_000.0
+
+/**
+ * Ten minutes: long enough for a tunnel or a dead zone, short enough to still be one leg.
+ *
+ * Distance alone is not enough to decide. A gap can be short in kilometres and hours long, and
+ * over those hours the route between the two ends is anyone's guess - quite possibly a long way
+ * round that comes back.
+ */
+const val MAX_GAP_SECONDS = 600.0
+
+/**
+ * Whether two consecutive fixes are near enough, and soon enough, to be one unbroken leg.
+ *
+ * This is the single rule for "did we watch the whole way between these two points". The fog uses
+ * it to decide whether to uncover the ground between them, and the trail uses it to decide whether
+ * to draw a line between them - and those two must agree. A trail that draws a straight line
+ * across a gap the fog would not fill claims a route that was never recorded.
+ */
+fun isOneLeg(distanceMeters: Double, seconds: Double): Boolean =
+    distanceMeters <= FogEngine.DEFAULT_MAX_GAP_METERS && seconds <= MAX_GAP_SECONDS
