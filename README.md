@@ -17,8 +17,11 @@ are for map tiles and (optionally) naming the countries you pass through.
   antimeridian properly: if you have been to both Tokyo and San Francisco it wraps across the
   Pacific rather than zooming out to the whole planet the long way round.
 - **Honest numbers.** Uncovered area in km², percentage of Earth's land and of the whole planet,
-  distance travelled, days out, countries and regions visited, and how much new ground you broke
-  each year.
+  distance travelled, days out, and how much new ground you broke each year.
+- **Broken down by continent, country and state.** How much of each place you have actually
+  covered, ranked, with the real share of each — 0.4% of Delaware reads as 0.4% of Delaware, not
+  as a percentage of the planet. Worked out on the phone from a packaged atlas, so it needs no
+  network and covers trips you imported as well as ones it watched.
 - **Your data stays yours.** Export a full backup as JSON, the uncovered area as GeoJSON, or your
   trail as GPX. Import a backup to merge an old phone's map into this one.
 - **Rescue a trip it missed.** Import a Google Maps Timeline export or a GPX from any other
@@ -150,14 +153,53 @@ consistent, so progress over time is meaningful, but it is not a survey.
 
 ```
 core/   Plain Kotlin/JVM. Tile maths, the fog engine, the explored-cell index,
-        statistics and the backup/GPX/GeoJSON formats. No Android types, so it
-        is unit-tested on the JVM with no emulator.
+        statistics, the region atlas and the backup/GPX/GeoJSON formats. No
+        Android types, so it is unit-tested on the JVM with no emulator.
 app/    Everything Android: Room storage, the location service, and a Compose UI
         over an osmdroid map.
+tools/  The script that builds the region atlas from public boundary data. Run
+        by hand; its output is committed.
 ```
 
 Keeping the geometry in a separate JVM module is deliberate: the parts most likely to be subtly
 wrong are the parts that can be tested in a second.
+
+## Counting continents, countries and states
+
+Working out which country a square is in would normally mean a point-in-polygon test against a few
+million vertices, or a network call. Neither suits an app that has to do it for every square you
+have ever uncovered, offline, while you scroll.
+
+So the world's borders are drawn *once*, ahead of time, onto the very same Web Mercator grid the
+fog uses — at z12, about 10 km per square — and stored run-length encoded, one row at a time. That
+is `core/src/main/resources/regions.bin`: 4,822 regions and about a megabyte. A lookup is then a
+bit-shift to get from a fog square to an atlas square and a binary search along one row.
+
+Two consequences worth knowing:
+
+- **Borders are only accurate to about 10 km.** Somewhere within a few kilometres of a state line
+  can be credited to the wrong side of it. Nothing about the fog itself is affected — only which
+  region its area is counted under.
+- **Percentages are measured against true boundary areas, not against the grid.** If the
+  denominator were the atlas squares, any region smaller than one square would read as fully
+  explored the moment you clipped its corner. The generator computes each region's real geodesic
+  area instead, and the displayed share is capped at 100% so a coarse coastline cannot push a small
+  island past it.
+
+Countries roll up into continents and states roll up into countries, so the three sets of numbers
+nest. Russia is counted as Asia: the source data files all of it under Europe, which would hand
+Europe thirteen million square kilometres of Siberia and make "how much of Europe have I seen"
+meaningless. States are whatever each country calls its first-level divisions, which is why the
+United States contributes fifty and the United Kingdom contributes two hundred and thirty-two.
+
+Rebuilding the atlas (only needed to change the resolution or the source data):
+
+```
+python3 tools/build_region_mask.py --zoom 12 \
+    --countries ne_50m_admin_0_countries.geojson \
+    --subdivisions ne_10m_admin_1_states_provinces.geojson \
+    --out core/src/main/resources/regions.bin
+```
 
 ## Settings worth knowing
 
@@ -185,3 +227,6 @@ Map tiles are served by [OpenStreetMap](https://www.openstreetmap.org/copyright)
 contributors, rendered through [osmdroid](https://github.com/osmdroid/osmdroid). The app identifies
 itself with its own user agent, as the OSM tile usage policy requires. Heavy use should be pointed
 at your own tile server.
+
+Borders, country names and state names come from [Natural Earth](https://www.naturalearthdata.com),
+which is in the public domain.

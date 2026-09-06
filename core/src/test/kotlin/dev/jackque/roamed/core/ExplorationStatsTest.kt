@@ -34,7 +34,7 @@ class ExplorationStatsTest {
 
     @Test
     fun `areas are formatted with a sensible unit`() {
-        assertEquals("2500 km²", ExplorationStats.formatArea(2.5e9))
+        assertEquals("2,500 km²", ExplorationStats.formatArea(2.5e9))
         assertEquals("12.5 km²", ExplorationStats.formatArea(1.25e7))
         assertEquals("0.5 ha", ExplorationStats.formatArea(5_000.0))
     }
@@ -43,6 +43,6 @@ class ExplorationStatsTest {
     fun `distances switch from metres to kilometres`() {
         assertEquals("450 m", ExplorationStats.formatDistance(450.0))
         assertEquals("4.5 km", ExplorationStats.formatDistance(4_500.0))
-        assertEquals("1234 km", ExplorationStats.formatDistance(1_234_000.0))
+        assertEquals("1,234 km", ExplorationStats.formatDistance(1_234_000.0))
     }
 }

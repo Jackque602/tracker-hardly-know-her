@@ -46,9 +46,12 @@ object ExplorationStats {
         else -> fixed(meters, 0) + " m"
     }
 
-    /** Fixed-point with trailing zeros trimmed, so "0.00100" reads as "0.001". */
+    /**
+     * Fixed-point with trailing zeros trimmed, so "0.00100" reads as "0.001", and thousands
+     * grouped, because a continent measured in square kilometres is otherwise eight bare digits.
+     */
     private fun fixed(value: Double, decimals: Int): String {
-        val text = String.format(Locale.US, "%.${decimals}f", value)
+        val text = String.format(Locale.US, "%,.${decimals}f", value)
         if (!text.contains('.')) return text
         return text.trimEnd('0').trimEnd('.')
     }

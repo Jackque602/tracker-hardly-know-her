@@ -2,12 +2,16 @@ package dev.jackque.roamed
 
 import android.app.Application
 import android.content.Context
+import android.util.Log
+import dev.jackque.roamed.core.regions.RegionMask
 import dev.jackque.roamed.data.db.RoamedDatabase
 import dev.jackque.roamed.data.repo.ExplorationRepository
 import dev.jackque.roamed.data.repo.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import org.osmdroid.config.Configuration
 import java.io.File
@@ -25,6 +29,25 @@ class AppContainer(private val context: Context) {
     val exploration: ExplorationRepository by lazy { ExplorationRepository(database) }
     val settings: SettingsRepository by lazy { SettingsRepository(context) }
     val applicationScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /**
+     * The world's borders, read from the packaged mask the first time the stats screen asks and
+     * shared from then on. It is about a megabyte, so it is decoded off the main thread and only
+     * if something actually wants it - the map and the tracker never do.
+     */
+    private val regionMaskOnce: Deferred<RegionMask?> by lazy {
+        applicationScope.async(Dispatchers.IO) {
+            try {
+                RegionMask.bundled()
+            } catch (e: Throwable) {
+                // Worth knowing about, but every other stat still works without it.
+                Log.w("Roamed", "region mask unavailable; per-country stats will be hidden", e)
+                null
+            }
+        }
+    }
+
+    suspend fun regionMask(): RegionMask? = regionMaskOnce.await()
 }
 
 class RoamedApplication : Application() {

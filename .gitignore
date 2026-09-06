@@ -16,3 +16,4 @@ local.properties
 *.jks
 *.p12
 keystore.properties
+__pycache__/
