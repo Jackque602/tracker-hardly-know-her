@@ -17,8 +17,11 @@ data class RegionProgress(
 /**
  * Everywhere you have been, grouped.
  *
- * Each list holds only regions with ground uncovered in them, ordered by how much - so the top of
- * [countries] is the country you have seen most of, not the largest one.
+ * Each list holds only regions with ground uncovered in them, ordered by the share of them you
+ * have covered - so the top of [countries] is the country you have seen most *of*, which is not
+ * the one you have covered the most square kilometres of. Ordering by raw area instead would rank
+ * the list differently from the percentage shown against every row, and a list whose order
+ * disagrees with its own numbers is worse than either ordering alone.
  */
 data class RegionTally(
     val continents: List<RegionProgress> = emptyList(),
@@ -75,7 +78,12 @@ object RegionBreakdown {
                 ),
             )
         }
-        byKind.values.forEach { list -> list.sortByDescending { it.exploredSquareMeters } }
+        byKind.values.forEach { list ->
+            list.sortWith(
+                compareByDescending<RegionProgress> { it.percentExplored }
+                    .thenByDescending { it.exploredSquareMeters },
+            )
+        }
 
         return RegionTally(
             continents = byKind[RegionKind.CONTINENT].orEmpty(),

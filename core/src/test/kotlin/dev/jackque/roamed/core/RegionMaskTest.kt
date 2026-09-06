@@ -135,9 +135,20 @@ class RegionMaskTest {
 
         val tally = RegionBreakdown.of(mask, cells.toLongArray())
         assertEquals(
-            listOf("Pennsylvania", "Delaware"),
-            tally.subdivisions.map { it.region.name },
-            "both states, the one with more ground first",
+            setOf("Pennsylvania", "Delaware"),
+            tally.subdivisions.map { it.region.name }.toSet(),
+            "both states should be counted",
+        )
+        // Two of the three circles are in Pennsylvania, but Pennsylvania is twenty-three times the
+        // size of Delaware, so the smaller state is the one further along - and that is the order.
+        assertEquals("Delaware", tally.subdivisions.first().region.name)
+        assertTrue(
+            tally.subdivisions[0].percentExplored > tally.subdivisions[1].percentExplored,
+            "the list must run in the same direction as the percentages it shows",
+        )
+        assertTrue(
+            tally.subdivisions[1].exploredSquareMeters > tally.subdivisions[0].exploredSquareMeters,
+            "and that is deliberately not the same as ranking by area covered",
         )
         assertEquals(listOf("United States of America"), tally.countries.map { it.region.name })
         assertEquals(listOf("North America"), tally.continents.map { it.region.name })

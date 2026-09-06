@@ -162,17 +162,18 @@ private fun LazyListScope.regionSection(
     item(key = "region-section-$title") {
         var expanded by rememberSaveable(title) { mutableStateOf(false) }
         val shown = if (expanded) entries else entries.take(COLLAPSED_ROWS)
-        val leader = entries.first().exploredSquareMeters.coerceAtLeast(1.0)
 
         SectionCard(title = "$title · ${entries.size}") {
             Text(
-                text = "Bars compare these against each other. The percentage is the real share " +
-                    "of the place you have set foot in.",
+                text = "Most covered first.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(Modifier.height(8.dp))
-            shown.forEach { entry -> RegionRow(entry, leader) }
+            Spacer(Modifier.height(4.dp))
+            shown.forEachIndexed { index, entry ->
+                if (index > 0) HorizontalDivider()
+                RegionRow(entry)
+            }
             if (entries.size > COLLAPSED_ROWS) {
                 TextButton(onClick = { expanded = !expanded }) {
                     Text(if (expanded) "Show fewer" else "Show all ${entries.size}")
@@ -182,46 +183,54 @@ private fun LazyListScope.regionSection(
     }
 }
 
+/**
+ * One region: what it is, how much of it you have covered, and what share that is.
+ *
+ * There is deliberately no progress bar. A bar scaled to the biggest row would say the top of
+ * every list is finished - a single-entry list would be permanently full - and a bar scaled to the
+ * true share is under a pixel wide at the fractions of a percent this app deals in. Either way it
+ * would be a picture that disagreed with the number printed beside it.
+ */
 @Composable
-private fun RegionRow(entry: RegionProgress, leaderSquareMeters: Double) {
-    Column(
+private fun RegionRow(entry: RegionProgress) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp),
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.Top,
     ) {
-        Row(verticalAlignment = Alignment.Top) {
-            Column(Modifier.weight(1f)) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = entry.region.name,
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            entry.parentName?.let { parent ->
                 Text(
-                    text = entry.region.name,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = listOfNotNull(
-                        entry.parentName,
-                        "${ExplorationStats.formatArea(entry.exploredSquareMeters)} of " +
-                            ExplorationStats.formatArea(entry.region.areaSquareMeters),
-                    ).joinToString(" · "),
+                    text = parent,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(horizontalAlignment = Alignment.End) {
             Text(
                 text = ExplorationStats.formatPercent(entry.percentExplored),
-                style = MaterialTheme.typography.titleSmall,
+                style = MaterialTheme.typography.titleMedium,
+                textAlign = TextAlign.End,
+            )
+            Text(
+                text = "${ExplorationStats.formatArea(entry.exploredSquareMeters)} of " +
+                    ExplorationStats.formatArea(entry.region.areaSquareMeters),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.End,
             )
         }
-        Spacer(Modifier.height(4.dp))
-        LinearProgressIndicator(
-            progress = { (entry.exploredSquareMeters / leaderSquareMeters).toFloat().coerceIn(0f, 1f) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(6.dp),
-        )
     }
 }
 
