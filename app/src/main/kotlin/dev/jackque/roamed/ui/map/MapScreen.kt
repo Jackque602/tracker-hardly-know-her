@@ -83,7 +83,7 @@ fun MapScreen() {
             controller.setZoom(4.0)
         }
     }
-    val overlay = remember { FogOverlay(viewModel.index) }
+    val overlay = remember { FogOverlay(viewModel.index, viewModel.airIndex) }
 
     DisposableEffect(mapView, overlay) {
         mapView.overlays.add(overlay)

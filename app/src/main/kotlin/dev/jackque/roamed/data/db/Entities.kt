@@ -1,8 +1,10 @@
 package dev.jackque.roamed.data.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import dev.jackque.roamed.core.model.CellSource
 
 /**
  * One uncovered square of the world.
@@ -10,7 +12,11 @@ import androidx.room.PrimaryKey
  * The primary key is the cell's position in the fixed grid, so re-visiting somewhere can never
  * create a duplicate row no matter how many fixes land inside it.
  */
-@Entity(tableName = "explored_cell", primaryKeys = ["x", "y"], indices = [Index("firstSeen")])
+@Entity(
+    tableName = "explored_cell",
+    primaryKeys = ["x", "y"],
+    indices = [Index("firstSeen"), Index("source")],
+)
 data class ExploredCellEntity(
     val x: Int,
     val y: Int,
@@ -18,6 +24,14 @@ data class ExploredCellEntity(
     val lastSeen: Long,
     /** How many separate times a fix landed inside this cell (not how many fixes). */
     val visits: Int,
+    /**
+     * [CellSource.GROUND] or [CellSource.AIR], as an id.
+     *
+     * The default matches the one the 1-to-2 migration gives the column, which is what lets every
+     * cell recorded before flights existed carry on being ground without being rewritten.
+     */
+    @ColumnInfo(defaultValue = "0")
+    val source: Int = CellSource.GROUND.id,
 )
 
 /** A raw GPS fix. Kept for the trail overlay and GPX export; prunable without losing the fog. */

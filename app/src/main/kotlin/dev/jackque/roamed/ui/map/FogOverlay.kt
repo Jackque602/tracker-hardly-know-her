@@ -40,7 +40,11 @@ data class TrailPoint(val latitude: Double, val longitude: Double, val timestamp
  * exactly like every other feature on the map. A city you have walked stays city-shaped at every
  * zoom instead of swelling into a square the size of a county.
  */
-class FogOverlay(private val index: ExploredIndex) : Overlay() {
+class FogOverlay(
+    index: ExploredIndex,
+    /** The subset of [index] that was only ever flown over, tinted rather than left clear. */
+    airIndex: ExploredIndex,
+) : Overlay() {
 
     /** 0f is no fog at all, 1f is opaque. */
     var opacity: Float = 0.85f
@@ -54,6 +58,16 @@ class FogOverlay(private val index: ExploredIndex) : Overlay() {
 
     private val clearPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
+    }
+    /**
+     * The wash over ground that was only flown over.
+     *
+     * Translucent, so the map still reads through it: the point is that these squares *are*
+     * uncovered, just not in the same way as the ones you walked.
+     */
+    private val airPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.argb(96, 56, 132, 255)
     }
     private val edgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -82,32 +96,43 @@ class FogOverlay(private val index: ExploredIndex) : Overlay() {
     }
 
     /**
-     * Every visible cell goes into one path and is erased in a single pass. Overlapping rectangles
+     * One index's worth of visible cells, and the path they make.
+     *
+     * Every visible cell goes into one path and is drawn in a single pass. Overlapping rectangles
      * inside one path fill once, whereas erasing them one at a time would double-erase every
      * shared edge into a visible grid.
      */
-    private val fogPath = Path()
+    private class Layer(val index: ExploredIndex) {
+        val path = Path()
+        var cells: LongArray = LongArray(0)
+        var renderZoom: Int = RevealZoom.Z
+        var signature: String? = null
+    }
+
+    private val fogLayer = Layer(index)
+    private val airLayer = Layer(airIndex)
+
     private val trailPath = Path()
     private val scratchPoint = Point()
     private val scratchGeo = GeoPoint(0.0, 0.0)
 
-    /** Remembers which cells were last resolved, so panning does not re-query on every frame. */
-    private var cachedCells: LongArray = LongArray(0)
-    private var cachedZoom: Int = RevealZoom.Z
-    private var cacheSignature: String? = null
-
     override fun draw(canvas: Canvas, mapView: MapView, shadow: Boolean) {
         if (shadow) return
         val projection = mapView.projection
+        val mapZoom = mapView.zoomLevelDouble
 
-        buildFogPath(projection, mapView.zoomLevelDouble)
+        buildPath(fogLayer, projection, mapZoom, forcedZoom = null)
+        // The flown cells are a subset of the uncovered ones, so drawing them at the zoom the fog
+        // settled on keeps the two grids aligned - a tint can never spill outside its own hole.
+        buildPath(airLayer, projection, mapZoom, forcedZoom = fogLayer.renderZoom)
 
         // Fog first, in its own layer, so CLEAR only erases the fog and not the map beneath it.
         val layer = canvas.saveLayer(null, null)
         canvas.drawColor(fogPaintColor)
-        canvas.drawPath(fogPath, clearPaint)
+        canvas.drawPath(fogLayer.path, clearPaint)
         canvas.restoreToCount(layer)
-        canvas.drawPath(fogPath, edgePaint)
+        canvas.drawPath(airLayer.path, airPaint)
+        canvas.drawPath(fogLayer.path, edgePaint)
 
         if (showTrail) drawTrail(canvas, projection)
         drawCurrentPosition(canvas, projection)
@@ -129,19 +154,25 @@ class FogOverlay(private val index: ExploredIndex) : Overlay() {
     private fun cellPixelSize(mapZoom: Double, renderZoom: Int): Float =
         (TILE_SIZE_PX * 2.0.pow(mapZoom - renderZoom)).toFloat()
 
-    private fun buildFogPath(projection: Projection, mapZoom: Double) {
-        val ideal = idealRenderZoom(mapZoom)
-        val signature = "${projection.boundingBox}:$ideal:${index.version}"
-        if (signature != cacheSignature) {
-            resolveCells(projection, ideal)
-            cacheSignature = signature
+    private fun buildPath(
+        layer: Layer,
+        projection: Projection,
+        mapZoom: Double,
+        forcedZoom: Int?,
+    ) {
+        val ideal = forcedZoom ?: idealRenderZoom(mapZoom)
+        val signature = "${projection.boundingBox}:$ideal:${layer.index.version}"
+        if (signature != layer.signature) {
+            resolveCells(layer, projection, ideal, coarsenIfBusy = forcedZoom == null)
+            layer.signature = signature
         }
 
-        fogPath.rewind()
-        val cells = cachedCells
+        val path = layer.path
+        path.rewind()
+        val cells = layer.cells
         if (cells.isEmpty()) return
 
-        val renderZoom = cachedZoom
+        val renderZoom = layer.renderZoom
         // Half a pixel of overlap hides hairline seams between neighbours, but on a two-pixel cell
         // that would be a quarter of its width, so it is scaled down with the cells.
         val overlap = min(SEAM_OVERLAP_PX, cellPixelSize(mapZoom, renderZoom) * 0.15f)
@@ -166,7 +197,7 @@ class FogOverlay(private val index: ExploredIndex) : Overlay() {
             val bottom = scratchPoint.y.toFloat() + overlap
 
             if (right < left || bottom < top) continue
-            fogPath.addRect(left, top, right, bottom, Path.Direction.CW)
+            path.addRect(left, top, right, bottom, Path.Direction.CW)
         }
     }
 
@@ -178,7 +209,12 @@ class FogOverlay(private val index: ExploredIndex) : Overlay() {
      * means an area so densely covered that a coarser square is nearly full anyway. Coarsening
      * there costs a pixel or two of accuracy and saves the frame rate.
      */
-    private fun resolveCells(projection: Projection, idealZoom: Int) {
+    private fun resolveCells(
+        layer: Layer,
+        projection: Projection,
+        idealZoom: Int,
+        coarsenIfBusy: Boolean,
+    ) {
         var renderZoom = idealZoom
         while (true) {
             val grid = TileMath.gridSize(renderZoom)
@@ -194,10 +230,10 @@ class FogOverlay(private val index: ExploredIndex) : Overlay() {
                 xTo = grid - 1
             }
 
-            val found = index.cellsIn(renderZoom, xFrom, xTo, yFrom, yTo)
-            if (found.size <= MAX_CELLS_PER_FRAME || renderZoom == 0) {
-                cachedCells = found
-                cachedZoom = renderZoom
+            val found = layer.index.cellsIn(renderZoom, xFrom, xTo, yFrom, yTo)
+            if (!coarsenIfBusy || found.size <= MAX_CELLS_PER_FRAME || renderZoom == 0) {
+                layer.cells = found
+                layer.renderZoom = renderZoom
                 return
             }
             renderZoom--

@@ -7,6 +7,7 @@ data class CellRecord(
     val firstSeen: Long,
     val lastSeen: Long,
     val visits: Int,
+    val source: CellSource = CellSource.GROUND,
 )
 
 /** One recorded GPS fix. */

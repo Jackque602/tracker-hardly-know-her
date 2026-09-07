@@ -75,6 +75,12 @@ fun StatsScreen() {
                     add("Distance travelled" to ExplorationStats.formatDistance(summary.totalDistanceMeters))
                     add("This year" to ExplorationStats.formatDistance(summary.distanceThisYearMeters))
                     add("Days out and about" to summary.activeDays.toString())
+                    if (summary.flownSquareMeters > 0.0) {
+                        add(
+                            "Flown over" to
+                                ExplorationStats.formatArea(summary.flownSquareMeters),
+                        )
+                    }
                     if (regions != null) {
                         add("Continents" to outOf(regions.continents.size, regions.continentsInAtlas))
                         add("Countries" to outOf(regions.countries.size, regions.countriesInAtlas))
@@ -140,7 +146,7 @@ fun StatsScreen() {
         }
 
         item {
-            Footnote(summary.rawFixCount, regions)
+            Footnote(summary.rawFixCount, summary.flownSquareMeters, regions)
         }
     }
 }
@@ -235,13 +241,21 @@ private fun RegionRow(entry: RegionProgress) {
 }
 
 @Composable
-private fun Footnote(rawFixCount: Int, regions: RegionTally?) {
+private fun Footnote(rawFixCount: Int, flownSquareMeters: Double, regions: RegionTally?) {
     val text = buildString {
         append(
             "Area counts every grid square you have been seen inside, and a square is about " +
                 "300 m across at the equator - so a short walk still uncovers a whole one. " +
                 "$rawFixCount raw fixes are stored for the trail and GPX export.",
         )
+        if (flownSquareMeters > 0.0) {
+            append(
+                "\n\nThe blue ground is flown over, not travelled: uncovered, but seen from ten " +
+                    "kilometres up. It counts towards the area and the map, and is deliberately " +
+                    "left out of the continent, country and state figures below - passing over a " +
+                    "country is not being there.",
+            )
+        }
         if (regions != null) {
             append(
                 "\n\nBorders are matched on a grid about 10 km across, so somewhere within a few " +

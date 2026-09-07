@@ -48,6 +48,37 @@ class ExploredIndex(private val zoom: Int = RevealZoom.Z) {
         fresh
     }
 
+    /**
+     * Takes cells back out. Returns the keys that were actually present.
+     *
+     * Needed because a cell can change its mind about what it is: ground first flown over and
+     * later actually walked belongs in the walked set and not the flown one, and landing does
+     * exactly that to every square around the arrivals hall.
+     *
+     * The coarse cache is dropped wholesale rather than picked at. Working out whether a coarse
+     * cell still has any fine cell under it means walking its descendants, and removals are rare
+     * enough that rebuilding lazily is the cheaper trade.
+     */
+    fun removeAll(keys: Iterable<Long>): List<Long> = synchronized(lock) {
+        val removed = ArrayList<Long>()
+        for (key in keys) {
+            if (!all.remove(key)) continue
+            val bucketKey = CellKey.toZoom(key, zoom, BUCKET_ZOOM)
+            buckets[bucketKey]?.let { bucket ->
+                bucket.remove(key)
+                if (bucket.isEmpty()) buckets.remove(bucketKey)
+            }
+            areaSquareMeters -= rowArea(CellKey.y(key))
+            removed.add(key)
+        }
+        if (removed.isNotEmpty()) {
+            coarseCache.fill(null)
+            if (all.isEmpty()) areaSquareMeters = 0.0
+            version++
+        }
+        removed
+    }
+
     fun clear() = synchronized(lock) {
         all.clear()
         buckets.clear()

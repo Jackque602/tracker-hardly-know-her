@@ -119,6 +119,15 @@ fun SettingsScreen() {
                         checked = settings.connectTheDots,
                         onChange = viewModel::setConnectTheDots,
                     )
+                    SwitchRow(
+                        label = "Uncover flight paths",
+                        description = "Two fixes far apart and fast enough to have been a flight " +
+                            "uncover the great circle between them, tinted blue so you can tell " +
+                            "it from ground you actually travelled. Flown ground is left out of " +
+                            "the continent, country and state figures.",
+                        checked = settings.uncoverFlightPaths,
+                        onChange = viewModel::setUncoverFlightPaths,
+                    )
                 }
             }
 

@@ -6,6 +6,7 @@ import dev.jackque.roamed.core.backup.GeoJsonSink
 import dev.jackque.roamed.core.backup.GpxSink
 import dev.jackque.roamed.core.fog.ExploredIndex
 import dev.jackque.roamed.core.fog.FogEngine
+import dev.jackque.roamed.core.fog.isFlight
 import dev.jackque.roamed.core.fog.isImplausibleJump
 import dev.jackque.roamed.core.fog.isOneLeg
 import dev.jackque.roamed.core.geo.CellKey
@@ -15,6 +16,7 @@ import dev.jackque.roamed.core.geo.TileMath
 import dev.jackque.roamed.core.importer.ImportedFix
 import dev.jackque.roamed.core.importer.ImportedTrack
 import dev.jackque.roamed.core.model.CellRecord
+import dev.jackque.roamed.core.model.CellSource
 import dev.jackque.roamed.core.model.TrackPointRecord
 import dev.jackque.roamed.core.stats.ExplorationStats
 import dev.jackque.roamed.data.db.DailyStatEntity
@@ -71,6 +73,8 @@ sealed interface RecordOutcome {
 data class ExplorationSummary(
     val cellCount: Int = 0,
     val areaSquareMeters: Double = 0.0,
+    /** Of [areaSquareMeters], the part only ever flown over. */
+    val flownSquareMeters: Double = 0.0,
     val percentOfSurface: Double = 0.0,
     val percentOfLand: Double = 0.0,
     val totalDistanceMeters: Double = 0.0,
@@ -98,6 +102,17 @@ class ExplorationRepository(
 ) {
 
     val index = ExploredIndex()
+
+    /**
+     * The subset of [index] that has only ever been flown over.
+     *
+     * A separate index rather than a flag on each cell, because everything that reads the fog -
+     * the overlay's viewport query, the running area, the fit-to-explored box - already works on
+     * an ExploredIndex, and a second one gets all of that for free. Flown cells live in both: the
+     * map still uncovers them, this just knows which ones to tint.
+     */
+    val airIndex = ExploredIndex()
+
     private val fog = FogEngine()
     private val mutex = Mutex()
 
@@ -113,6 +128,9 @@ class ExplorationRepository(
             if (_state.value.loaded) return@withLock
             val cells = database.exploredCellDao().loadAll()
             index.addAll(cells.map { CellKey.pack(it.x, it.y) })
+            airIndex.addAll(
+                cells.filter { it.source == CellSource.AIR.id }.map { CellKey.pack(it.x, it.y) },
+            )
             publish()
         }
     }
@@ -127,6 +145,7 @@ class ExplorationRepository(
             val previous = anchor
             var distance = 0.0
             var joinToPrevious = false
+            var flew = false
 
             if (previous != null) {
                 val moved = Geo.distanceMeters(
@@ -135,6 +154,10 @@ class ExplorationRepository(
                 val elapsedSeconds = (fix.timestamp - previous.timestamp) / 1000.0
                 when {
                     isImplausibleJump(moved, elapsedSeconds) -> Unit // teleport: reveal, don't join
+                    settings.uncoverFlightPaths && isFlight(moved, elapsedSeconds) -> {
+                        distance = moved
+                        flew = true
+                    }
                     moved < jitterThreshold(accuracy) -> {
                         // Standing still. Keep the old anchor so GPS noise cannot fake a walk.
                         return@withLock recordStationary(fix, settings)
@@ -147,18 +170,24 @@ class ExplorationRepository(
             }
 
             val radius = settings.revealRadiusMeters.toDouble()
-            val cells = if (joinToPrevious && previous != null) {
-                fog.cellsAlongSegment(
+            val cells = when {
+                flew && previous != null -> fog.cellsAlongFlight(
                     previous.latitude, previous.longitude,
                     fix.latitude, fix.longitude,
                     radiusMeters = radius,
                 )
-            } else {
-                fog.cellsWithinRadius(fix.latitude, fix.longitude, radius)
+                joinToPrevious && previous != null -> fog.cellsAlongSegment(
+                    previous.latitude, previous.longitude,
+                    fix.latitude, fix.longitude,
+                    radiusMeters = radius,
+                )
+                else -> fog.cellsWithinRadius(fix.latitude, fix.longitude, radius)
             }
 
+            val source = if (flew) CellSource.AIR else CellSource.GROUND
             val fresh = index.addAll(cells)
-            persist(fix, fresh, distance, settings)
+            if (flew) airIndex.addAll(fresh) else promoteToGround(cells)
+            persist(fix, fresh, distance, settings, source)
             anchor = fix
             publish(fix)
             RecordOutcome.Recorded(fresh.size, distance)
@@ -171,9 +200,26 @@ class ExplorationRepository(
             fix.latitude, fix.longitude, settings.revealRadiusMeters.toDouble(),
         )
         val fresh = index.addAll(cells)
-        persist(fix, fresh, distanceMeters = 0.0, settings = settings)
+        promoteToGround(cells)
+        persist(fix, fresh, distanceMeters = 0.0, settings = settings, source = CellSource.GROUND)
         publish(fix)
         return RecordOutcome.Recorded(fresh.size, 0.0)
+    }
+
+    /**
+     * Reclassifies squares that were only ever flown over and have now actually been visited.
+     *
+     * Every landing does this: the flight ribbon covers the airport it ends at, and the first fix
+     * on the ground there is standing in squares currently marked as flown. Usually a handful of
+     * cells, so the per-cell update is not worth batching.
+     */
+    private suspend fun promoteToGround(cells: Collection<Long>) {
+        if (airIndex.size == 0) return
+        val promoted = airIndex.removeAll(cells)
+        for (key in promoted) {
+            database.exploredCellDao()
+                .setSource(CellKey.x(key), CellKey.y(key), CellSource.GROUND.id)
+        }
     }
 
     private suspend fun persist(
@@ -181,14 +227,19 @@ class ExplorationRepository(
         freshKeys: List<Long>,
         distanceMeters: Double,
         settings: RoamedSettings,
+        source: CellSource,
     ) {
         val now = fix.timestamp
         if (freshKeys.isNotEmpty()) {
-            database.exploredCellDao().insertNew(
-                freshKeys.map { key ->
-                    ExploredCellEntity(CellKey.x(key), CellKey.y(key), now, now, visits = 1)
-                },
-            )
+            freshKeys.chunked(IMPORT_CHUNK).forEach { chunk ->
+                database.exploredCellDao().insertNew(
+                    chunk.map { key ->
+                        ExploredCellEntity(
+                            CellKey.x(key), CellKey.y(key), now, now, visits = 1, source = source.id,
+                        )
+                    },
+                )
+            }
         }
         // Bump the visit counter for the cell you are actually standing in - but not if it was
         // only just created, which already counts as visit one.
@@ -228,6 +279,10 @@ class ExplorationRepository(
         var pointCount = 0
         // Earliest timestamp wins, so an imported cell is dated when it was actually first crossed.
         val discovered = HashMap<Long, Long>()
+        // A cell reached both ways is ground: having flown over somewhere you also walked adds
+        // nothing to what you know of it, and must not take the credit away.
+        val walked = HashSet<Long>()
+        val flown = HashSet<Long>()
 
         for (track in tracks) {
             var previous: ImportedFix? = null
@@ -235,21 +290,28 @@ class ExplorationRepository(
                 pointCount++
                 val cells = HashSet<Long>()
                 val from = previous
-                if (from != null && joinable(from, point, track.contiguous)) {
-                    fog.cellsAlongSegment(
+                val flightLeg = from != null && settings.uncoverFlightPaths && flownBetween(from, point)
+                when {
+                    from != null && flightLeg -> fog.cellsAlongFlight(
                         from.latitude, from.longitude,
                         point.latitude, point.longitude,
                         radiusMeters = radius,
                         into = cells,
                     )
-                } else {
-                    fog.cellsWithinRadius(point.latitude, point.longitude, radius, cells)
+                    from != null && joinable(from, point, track.contiguous) -> fog.cellsAlongSegment(
+                        from.latitude, from.longitude,
+                        point.latitude, point.longitude,
+                        radiusMeters = radius,
+                        into = cells,
+                    )
+                    else -> fog.cellsWithinRadius(point.latitude, point.longitude, radius, cells)
                 }
                 val stamp = point.timestamp ?: 0L
                 for (cell in cells) {
                     val existing = discovered[cell]
                     if (existing == null || (stamp in 1 until existing)) discovered[cell] = stamp
                 }
+                (if (flightLeg) flown else walked).addAll(cells)
                 previous = point
             }
         }
@@ -259,14 +321,35 @@ class ExplorationRepository(
             fresh.entries.chunked(IMPORT_CHUNK).forEach { chunk ->
                 database.exploredCellDao().insertNew(
                     chunk.map { (key, stamp) ->
-                        ExploredCellEntity(CellKey.x(key), CellKey.y(key), stamp, stamp, visits = 1)
+                        val source =
+                            if (key in flown && key !in walked) CellSource.AIR else CellSource.GROUND
+                        ExploredCellEntity(
+                            CellKey.x(key), CellKey.y(key), stamp, stamp, visits = 1,
+                            source = source.id,
+                        )
                     },
                 )
             }
             index.addAll(fresh.keys)
+            airIndex.addAll(fresh.keys.filter { it in flown && it !in walked })
+            // Ground in this import beats a flight recorded over the same square earlier.
+            promoteToGround(walked)
             publish(_state.value.lastFix)
             TrackImportResult(tracks.size, pointCount, fresh.size)
         }
+    }
+
+    /**
+     * Whether an imported leg was flown.
+     *
+     * Timestamps are required rather than guessed at: the only evidence separating a flight from a
+     * tracker that slept through a drive is the speed, and without two times there is no speed.
+     */
+    private fun flownBetween(from: ImportedFix, to: ImportedFix): Boolean {
+        val start = from.timestamp ?: return false
+        val end = to.timestamp ?: return false
+        val moved = Geo.distanceMeters(from.latitude, from.longitude, to.latitude, to.longitude)
+        return isFlight(moved, (end - start) / 1000.0)
     }
 
     /**
@@ -309,12 +392,28 @@ class ExplorationRepository(
         database.visitedPlaceDao().record(place)
     }
 
+    /**
+     * Every uncovered cell that was actually travelled through.
+     *
+     * What the region breakdown counts, so that overflying a country at ten kilometres does not
+     * tick it off the list of countries you have been to.
+     */
+    fun groundKeys(): LongArray {
+        val everything = index.snapshotKeys()
+        if (airIndex.size == 0) return everything
+        val ground = LongArray(everything.size)
+        var n = 0
+        for (key in everything) if (!airIndex.contains(key)) ground[n++] = key
+        return ground.copyOf(n)
+    }
+
     suspend fun summary(): ExplorationSummary = withContext(io) {
         val area = index.areaSquareMeters
         val yearStart = LocalDate.now().withDayOfYear(1).toString()
         ExplorationSummary(
             cellCount = index.size,
             areaSquareMeters = area,
+            flownSquareMeters = airIndex.areaSquareMeters,
             percentOfSurface = ExplorationStats.percentOfEarthSurface(area),
             percentOfLand = ExplorationStats.percentOfEarthLand(area),
             totalDistanceMeters = database.dailyStatDao().totalDistance(),
@@ -336,6 +435,7 @@ class ExplorationRepository(
             database.dailyStatDao().deleteAll()
             database.visitedPlaceDao().deleteAll()
             index.clear()
+            airIndex.clear()
             anchor = null
             publish()
         }
@@ -389,10 +489,16 @@ class ExplorationRepository(
                 if (fresh.isNotEmpty()) {
                     database.exploredCellDao().insertNew(
                         fresh.map {
-                            ExploredCellEntity(it.x, it.y, it.firstSeen, it.lastSeen, it.visits)
+                            ExploredCellEntity(
+                                it.x, it.y, it.firstSeen, it.lastSeen, it.visits, it.source.id,
+                            )
                         },
                     )
                     index.addAll(fresh.map { CellKey.pack(it.x, it.y) })
+                    airIndex.addAll(
+                        fresh.filter { it.source == CellSource.AIR }
+                            .map { CellKey.pack(it.x, it.y) },
+                    )
                     added += fresh.size
                 }
             }
@@ -406,7 +512,13 @@ class ExplorationRepository(
         var offset = 0
         while (true) {
             val page = database.exploredCellDao().page(PAGE_SIZE, offset)
-            page.forEach { action(CellRecord(it.x, it.y, it.firstSeen, it.lastSeen, it.visits)) }
+            page.forEach {
+                action(
+                    CellRecord(
+                        it.x, it.y, it.firstSeen, it.lastSeen, it.visits, CellSource.of(it.source),
+                    ),
+                )
+            }
             if (page.size < PAGE_SIZE) break
             offset += PAGE_SIZE
         }

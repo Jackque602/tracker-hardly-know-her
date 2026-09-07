@@ -32,6 +32,9 @@ class MapViewModel(
     /** The overlay reads this directly; it is the single authoritative copy of the fog. */
     val index: ExploredIndex get() = exploration.index
 
+    /** The part of it that was only ever flown over, which the overlay tints instead of clearing. */
+    val airIndex: ExploredIndex get() = exploration.airIndex
+
     val fogState: StateFlow<FogState> = exploration.state
 
     val settings: StateFlow<RoamedSettings> = settingsRepository.settings

@@ -113,14 +113,54 @@ class FogEngine(private val zoom: Int = RevealZoom.Z) {
         val distance = Geo.distanceMeters(lat1, lon1, lat2, lon2)
         if (distance > maxGapMeters) return into
 
-        cellsWithinRadius(lat1, lon1, radiusMeters, into)
-        cellsWithinRadius(lat2, lon2, radiusMeters, into)
-        if (distance < 1.0) return into
-
         // Step at half the smaller of the reveal radius and the cell size so nothing is skipped.
         val cellWidth = TileMath.cellWidthMeters(TileMath.cellY(lat1, zoom), zoom)
         val step = max(5.0, min(radiusMeters, cellWidth) / 2.0)
-        val steps = min(MAX_INTERPOLATION_STEPS, ceil(distance / step).toInt())
+        return trace(lat1, lon1, lat2, lon2, radiusMeters, step, MAX_INTERPOLATION_STEPS, into)
+    }
+
+    /**
+     * Cells uncovered by flying between two points.
+     *
+     * Separate from [cellsAlongSegment] for two reasons. The obvious one is the limit: a flight is
+     * exactly the case that method refuses, and there is no useful cap short of half the planet.
+     * The other is the step. A ground segment steps every sixty metres, which is right for a road
+     * and would be a hundred thousand steps across the Atlantic; a flight steps by the reveal
+     * radius instead, so consecutive discs still overlap - the ribbon has no holes - at a fraction
+     * of the cost.
+     *
+     * [Geo.interpolate] walks the great circle, so the path bends the way a flight actually goes
+     * rather than running straight across the map: London to Los Angeles passes over Greenland,
+     * not over Newfoundland.
+     */
+    fun cellsAlongFlight(
+        lat1: Double,
+        lon1: Double,
+        lat2: Double,
+        lon2: Double,
+        radiusMeters: Double,
+        into: MutableSet<Long> = HashSet(),
+    ): MutableSet<Long> {
+        val step = max(25.0, radiusMeters)
+        return trace(lat1, lon1, lat2, lon2, radiusMeters, step, MAX_FLIGHT_STEPS, into)
+    }
+
+    private fun trace(
+        lat1: Double,
+        lon1: Double,
+        lat2: Double,
+        lon2: Double,
+        radiusMeters: Double,
+        stepMeters: Double,
+        maxSteps: Int,
+        into: MutableSet<Long>,
+    ): MutableSet<Long> {
+        cellsWithinRadius(lat1, lon1, radiusMeters, into)
+        cellsWithinRadius(lat2, lon2, radiusMeters, into)
+        val distance = Geo.distanceMeters(lat1, lon1, lat2, lon2)
+        if (distance < 1.0) return into
+
+        val steps = min(maxSteps, ceil(distance / stepMeters).toInt())
         for (i in 1 until steps) {
             val p = Geo.interpolate(lat1, lon1, lat2, lon2, i.toDouble() / steps)
             cellsWithinRadius(p[0], p[1], radiusMeters, into)
@@ -149,6 +189,9 @@ class FogEngine(private val zoom: Int = RevealZoom.Z) {
         const val DEFAULT_MAX_GAP_METERS = 25_000.0
         private const val MAX_COLUMNS = 4_096
         private const val MAX_INTERPOLATION_STEPS = 4_000
+
+        /** Enough for an antipodal flight at a 120 m reveal radius, with room to spare. */
+        private const val MAX_FLIGHT_STEPS = 200_000
     }
 }
 
@@ -158,6 +201,33 @@ const val IMPLAUSIBLE_SPEED_MPS = 305.0
 /** True when moving between two fixes in [seconds] would be physically implausible. */
 fun isImplausibleJump(distanceMeters: Double, seconds: Double): Boolean =
     seconds > 0.0 && distanceMeters / seconds > IMPLAUSIBLE_SPEED_MPS && abs(distanceMeters) > 1_000.0
+
+/**
+ * Slowest a flight averages door to door, m/s (~324 km/h).
+ *
+ * The average has to survive taxiing, holding and the walk to baggage reclaim, so it sits far
+ * below cruising speed. It is still above every scheduled train on earth - the fastest average
+ * about 270 km/h - which is what matters, because the alternative explanation for two distant
+ * fixes is always surface travel the tracker slept through.
+ */
+const val MIN_FLIGHT_SPEED_MPS = 90.0
+
+/** Below this, a fast surface journey is the likelier story whatever the arithmetic says. */
+const val MIN_FLIGHT_DISTANCE_METERS = 150_000.0
+
+/**
+ * True when the only sane explanation for two consecutive fixes is that you flew between them.
+ *
+ * Deliberately hard to trigger. The cost of a false positive is high and permanent: it uncovers a
+ * great-circle ribbon hundreds of kilometres long across ground that was never visited. The
+ * ordinary competing explanation - the tracker was killed for an hour while you drove - fails the
+ * speed test comfortably, because an hour of driving covers a hundred kilometres, not a thousand.
+ */
+fun isFlight(distanceMeters: Double, seconds: Double): Boolean =
+    distanceMeters >= MIN_FLIGHT_DISTANCE_METERS &&
+        seconds > 0.0 &&
+        !isImplausibleJump(distanceMeters, seconds) &&
+        distanceMeters / seconds >= MIN_FLIGHT_SPEED_MPS
 
 /**
  * Ten minutes: long enough for a tunnel or a dead zone, short enough to still be one leg.

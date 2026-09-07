@@ -33,6 +33,7 @@ data class RoamedSettings(
     val revealRadiusMeters: Int = 120,
     val maxAccuracyMeters: Int = 150,
     val connectTheDots: Boolean = true,
+    val uncoverFlightPaths: Boolean = true,
     val highAccuracyMode: Boolean = true,
     val fogOpacity: Float = 0.85f,
     val showTrail: Boolean = false,
@@ -63,6 +64,8 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setConnectTheDots(enabled: Boolean) = edit { it[Keys.CONNECT] = enabled }
 
+    suspend fun setUncoverFlightPaths(enabled: Boolean) = edit { it[Keys.FLIGHTS] = enabled }
+
     suspend fun setHighAccuracyMode(enabled: Boolean) = edit { it[Keys.HIGH_ACCURACY] = enabled }
 
     suspend fun setFogOpacity(opacity: Float) =
@@ -90,6 +93,7 @@ class SettingsRepository(private val context: Context) {
             revealRadiusMeters = this[Keys.RADIUS] ?: defaults.revealRadiusMeters,
             maxAccuracyMeters = this[Keys.ACCURACY] ?: defaults.maxAccuracyMeters,
             connectTheDots = this[Keys.CONNECT] ?: defaults.connectTheDots,
+            uncoverFlightPaths = this[Keys.FLIGHTS] ?: defaults.uncoverFlightPaths,
             highAccuracyMode = this[Keys.HIGH_ACCURACY] ?: defaults.highAccuracyMode,
             fogOpacity = this[Keys.OPACITY] ?: defaults.fogOpacity,
             showTrail = this[Keys.TRAIL] ?: defaults.showTrail,
@@ -108,6 +112,7 @@ class SettingsRepository(private val context: Context) {
         val RADIUS = intPreferencesKey("reveal_radius_meters")
         val ACCURACY = intPreferencesKey("max_accuracy_meters")
         val CONNECT = booleanPreferencesKey("connect_the_dots")
+        val FLIGHTS = booleanPreferencesKey("uncover_flight_paths")
         val HIGH_ACCURACY = booleanPreferencesKey("high_accuracy_mode")
         val OPACITY = floatPreferencesKey("fog_opacity")
         val TRAIL = booleanPreferencesKey("show_trail")

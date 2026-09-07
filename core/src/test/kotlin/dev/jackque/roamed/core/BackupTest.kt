@@ -157,4 +157,35 @@ class BackupTest {
         GeoJsonWriter.write(wholeJson, cells.asSequence())
         assertEquals(wholeJson.toString(), streamedJson.toString())
     }
+
+    @Test
+    fun `whether a cell was flown over survives a round trip`() {
+        val out = StringBuilder()
+        dev.jackque.roamed.core.backup.BackupWriter.write(
+            out,
+            sequenceOf(
+                dev.jackque.roamed.core.model.CellRecord(1, 2, 100L, 200L, 3),
+                dev.jackque.roamed.core.model.CellRecord(
+                    4, 5, 300L, 400L, 1, dev.jackque.roamed.core.model.CellSource.AIR,
+                ),
+            ),
+            exportedAt = 1L,
+            appVersion = "test",
+            cellCount = 2,
+        )
+        val cells = dev.jackque.roamed.core.backup.BackupReader.read(out.toString())
+        assertEquals(2, cells.size)
+        assertEquals(dev.jackque.roamed.core.model.CellSource.GROUND, cells[0].source)
+        assertEquals(dev.jackque.roamed.core.model.CellSource.AIR, cells[1].source)
+    }
+
+    @Test
+    fun `a backup written before flights existed reads as all ground`() {
+        // Five elements per row, no source. Every one of those squares was walked or driven.
+        val text = """{"format":"roamed-backup","version":1,"revealZoom":17,
+            "cells":[[1,2,100,200,3],[4,5,300,400,1]]}"""
+        val cells = dev.jackque.roamed.core.backup.BackupReader.read(text)
+        assertEquals(2, cells.size)
+        assertTrue(cells.all { it.source == dev.jackque.roamed.core.model.CellSource.GROUND })
+    }
 }

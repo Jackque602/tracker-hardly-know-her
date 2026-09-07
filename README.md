@@ -22,6 +22,11 @@ are for map tiles and (optionally) naming the countries you pass through.
   covered, ranked, with the real share of each — 0.4% of Delaware reads as 0.4% of Delaware, not
   as a percentage of the planet. Worked out on the phone from a packaged atlas, so it needs no
   network and covers trips you imported as well as ones it watched.
+- **Flights, in blue.** Two fixes far enough apart and fast enough to have been a flight uncover
+  the great circle between them - so a long-haul leg draws the arc it really flew, over Greenland
+  rather than straight across the map. It is tinted blue rather than left clear, and left out of
+  the continent, country and state figures, because passing over a country at ten kilometres is
+  not being there.
 - **Your data stays yours.** Export a full backup as JSON, the uncovered area as GeoJSON, or your
   trail as GPX. Import a backup to merge an old phone's map into this one.
 - **Rescue a trip it missed.** Import a Google Maps Timeline export or a GPX from any other
@@ -163,6 +168,33 @@ tools/  The script that builds the region atlas from public boundary data. Run
 
 Keeping the geometry in a separate JVM module is deliberate: the parts most likely to be subtly
 wrong are the parts that can be tested in a second.
+
+## Flights
+
+A transatlantic crossing uncovers well over a thousand square kilometres - several times what a
+year of walking does. Counting that the same way as ground you actually stood on would drown every
+other number on the stats screen, so flown ground is marked as its own thing from the moment it is
+recorded: a `source` column on every cell, a blue wash on the map, its own line in the stats, and
+no vote at all in the continent, country and state counts.
+
+Recognising a flight is deliberately hard to trigger, because the cost of getting it wrong is a
+great-circle ribbon hundreds of kilometres long across ground nobody visited. Two fixes count as a
+flight only if they are **at least 150 km apart** *and* imply an average of **at least 90 m/s**
+(324 km/h) *and* stay under the existing 305 m/s glitch ceiling. The competing explanation - the
+tracker was killed for an hour while you drove - fails that comfortably, because an hour of driving
+covers a hundred kilometres, not a thousand. So does every scheduled train on earth, the fastest of
+which averages about 270 km/h.
+
+Two other rules keep it honest:
+
+- **Ground beats air, always.** Land somewhere and the squares the flight painted around the
+  airport are reclassified as travelled on your first fix there. It never goes the other way -
+  flying over somewhere you have already walked tells you nothing new about it.
+- **The great circle is the path.** Interpolating in flat lat/lon would run London to Los Angeles
+  across the middle of the Atlantic. The tracer walks the sphere, so the arc goes where the
+  aircraft goes.
+
+Turn the whole thing off under Settings → Recording if you would rather flights left the map alone.
 
 ## Counting continents, countries and states
 

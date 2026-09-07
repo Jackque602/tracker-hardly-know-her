@@ -26,6 +26,19 @@ abstract class ExploredCellDao {
     @Query("UPDATE explored_cell SET lastSeen = :now, visits = visits + 1 WHERE x = :x AND y = :y")
     abstract suspend fun markVisited(x: Int, y: Int, now: Long)
 
+    /**
+     * Reclassifies one cell.
+     *
+     * Used to promote a square from flown-over to travelled the first time you actually go there.
+     * The reverse never happens: flying over somewhere you have already walked tells you nothing
+     * new about it, and must not take the credit for it away.
+     */
+    @Query("UPDATE explored_cell SET source = :source WHERE x = :x AND y = :y")
+    abstract suspend fun setSource(x: Int, y: Int, source: Int)
+
+    @Query("SELECT COUNT(*) FROM explored_cell WHERE source = :source")
+    abstract suspend fun countBySource(source: Int): Int
+
     @Query("SELECT MIN(firstSeen) FROM explored_cell")
     abstract suspend fun firstEverTimestamp(): Long?
 

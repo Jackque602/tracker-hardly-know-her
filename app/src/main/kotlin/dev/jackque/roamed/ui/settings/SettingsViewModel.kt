@@ -44,6 +44,7 @@ class SettingsViewModel(
     fun setRevealRadius(meters: Int) = update { settingsRepository.setRevealRadius(meters) }
     fun setMaxAccuracy(meters: Int) = update { settingsRepository.setMaxAccuracy(meters) }
     fun setConnectTheDots(on: Boolean) = update { settingsRepository.setConnectTheDots(on) }
+    fun setUncoverFlightPaths(on: Boolean) = update { settingsRepository.setUncoverFlightPaths(on) }
     fun setHighAccuracy(on: Boolean) = update { settingsRepository.setHighAccuracyMode(on) }
     fun setFogOpacity(value: Float) = update { settingsRepository.setFogOpacity(value) }
     fun setShowTrail(on: Boolean) = update { settingsRepository.setShowTrail(on) }

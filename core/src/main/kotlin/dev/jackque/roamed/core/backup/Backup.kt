@@ -2,14 +2,23 @@ package dev.jackque.roamed.core.backup
 
 import dev.jackque.roamed.core.geo.RevealZoom
 import dev.jackque.roamed.core.model.CellRecord
+import dev.jackque.roamed.core.model.CellSource
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 /**
  * The on-disk backup format.
  *
- * Cells are stored as bare arrays rather than objects - `[x, y, firstSeen, lastSeen, visits]` -
- * because a heavy user has hundreds of thousands of them and field names would triple the file.
+ * Cells are stored as bare arrays rather than objects -
+ * `[x, y, firstSeen, lastSeen, visits, source]` - because a heavy user has hundreds of thousands of
+ * them and field names would triple the file.
+ *
+ * The row grew a sixth element when flights became distinguishable from ground travel, and the
+ * version was deliberately *not* bumped for it. Every reader takes each element by position and
+ * falls back to a default when it is missing, so an older backup reads here with everything
+ * counted as ground, and a backup written here reads on an older build with the flights quietly
+ * counted as ground too. Bumping the version would have made older builds refuse the file outright
+ * for the sake of one optional number.
  */
 @Serializable
 data class BackupDocument(
@@ -64,7 +73,8 @@ class BackupSink(private val out: Appendable) {
             .append(cell.y.toString()).append(',')
             .append(cell.firstSeen.toString()).append(',')
             .append(cell.lastSeen.toString()).append(',')
-            .append(cell.visits.toString())
+            .append(cell.visits.toString()).append(',')
+            .append(cell.source.id.toString())
             .append(']')
     }
 
@@ -148,6 +158,7 @@ object BackupReader {
                 firstSeen = row.getOrElse(2) { 0L },
                 lastSeen = row.getOrElse(3) { row.getOrElse(2) { 0L } },
                 visits = row.getOrElse(4) { 1L }.toInt().coerceAtLeast(1),
+                source = CellSource.of(row.getOrElse(5) { 0L }.toInt()),
             )
         }
     }

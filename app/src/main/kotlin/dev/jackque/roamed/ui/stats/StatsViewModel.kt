@@ -54,9 +54,15 @@ class StatsViewModel(
         _state.value = _state.value.copy(regions = breakdown())
     }
 
+    /**
+     * Ground cells only.
+     *
+     * Flying over a country at ten kilometres is not being there, and counting it would put every
+     * country on a long-haul route onto the list of places visited.
+     */
     private suspend fun breakdown(): RegionTally? {
         val mask = regionMask() ?: return null
-        val cells = exploration.index.snapshotKeys()
+        val cells = exploration.groundKeys()
         return withContext(Dispatchers.Default) { RegionBreakdown.of(mask, cells) }
     }
 
