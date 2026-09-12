@@ -250,10 +250,10 @@ private fun Footnote(rawFixCount: Int, flownSquareMeters: Double, regions: Regio
         )
         if (flownSquareMeters > 0.0) {
             append(
-                "\n\nThe blue ground is flown over, not travelled: uncovered, but seen from ten " +
-                    "kilometres up. It counts towards the area and the map, and is deliberately " +
-                    "left out of the continent, country and state figures below - passing over a " +
-                    "country is not being there.",
+                "\n\nThe blue ground is flown over rather than travelled - uncovered, but seen " +
+                    "from ten kilometres up. It counts everywhere the rest does, the continent, " +
+                    "country and state figures included; the tint and the flown-over total above " +
+                    "are there so you can still tell which is which.",
             )
         }
         if (regions != null) {

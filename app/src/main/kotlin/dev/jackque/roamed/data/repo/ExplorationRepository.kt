@@ -392,21 +392,6 @@ class ExplorationRepository(
         database.visitedPlaceDao().record(place)
     }
 
-    /**
-     * Every uncovered cell that was actually travelled through.
-     *
-     * What the region breakdown counts, so that overflying a country at ten kilometres does not
-     * tick it off the list of countries you have been to.
-     */
-    fun groundKeys(): LongArray {
-        val everything = index.snapshotKeys()
-        if (airIndex.size == 0) return everything
-        val ground = LongArray(everything.size)
-        var n = 0
-        for (key in everything) if (!airIndex.contains(key)) ground[n++] = key
-        return ground.copyOf(n)
-    }
-
     suspend fun summary(): ExplorationSummary = withContext(io) {
         val area = index.areaSquareMeters
         val yearStart = LocalDate.now().withDayOfYear(1).toString()

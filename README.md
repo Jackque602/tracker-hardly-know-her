@@ -24,9 +24,8 @@ are for map tiles and (optionally) naming the countries you pass through.
   network and covers trips you imported as well as ones it watched.
 - **Flights, in blue.** Two fixes far enough apart and fast enough to have been a flight uncover
   the great circle between them - so a long-haul leg draws the arc it really flew, over Greenland
-  rather than straight across the map. It is tinted blue rather than left clear, and left out of
-  the continent, country and state figures, because passing over a country at ten kilometres is
-  not being there.
+  rather than straight across the map. It counts towards every figure exactly as driven ground
+  does; the blue tint and a separate flown-over total are there so you can still tell them apart.
 - **Android Auto.** The same fog map on the car screen, with the squares filling in as you drive,
   plus a status line that tells you tracking is actually alive and a button to start or stop it.
   Sideload-only by design - see below.
@@ -176,10 +175,10 @@ wrong are the parts that can be tested in a second.
 ## Flights
 
 A transatlantic crossing uncovers well over a thousand square kilometres - several times what a
-year of walking does. Counting that the same way as ground you actually stood on would drown every
-other number on the stats screen, so flown ground is marked as its own thing from the moment it is
-recorded: a `source` column on every cell, a blue wash on the map, its own line in the stats, and
-no vote at all in the continent, country and state counts.
+year of walking does. Flown ground is still marked as its own thing from the moment it is recorded
+- a `source` column on every cell, a blue wash on the map, its own line in the stats - but it
+counts towards every figure the same as driven ground, the continent, country and state counts
+included. Uncovered is uncovered; the tint is there to tell you how, not to dock you for it.
 
 Recognising a flight is deliberately hard to trigger, because the cost of getting it wrong is a
 great-circle ribbon hundreds of kilometres long across ground nobody visited. Two fixes count as a
@@ -193,7 +192,7 @@ Two other rules keep it honest:
 
 - **Ground beats air, always.** Land somewhere and the squares the flight painted around the
   airport are reclassified as travelled on your first fix there. It never goes the other way -
-  flying over somewhere you have already walked tells you nothing new about it.
+  flying over somewhere you have already walked should not restyle it as flown.
 - **The great circle is the path.** Interpolating in flat lat/lon would run London to Los Angeles
   across the middle of the Atlantic. The tracer walks the sphere, so the arc goes where the
   aircraft goes.

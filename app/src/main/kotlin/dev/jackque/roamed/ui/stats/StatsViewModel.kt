@@ -55,14 +55,16 @@ class StatsViewModel(
     }
 
     /**
-     * Ground cells only.
+     * Every uncovered square, flown or driven.
      *
-     * Flying over a country at ten kilometres is not being there, and counting it would put every
-     * country on a long-haul route onto the list of places visited.
+     * Flown ground used to be left out of this, on the argument that passing over a country is not
+     * being there. It is counted now because that was a judgement about what the numbers ought to
+     * mean, imposed on someone else's map - and uncovered is uncovered. The blue tint and the
+     * separate flown-over figure are still there to tell the two apart, which is what they are for.
      */
     private suspend fun breakdown(): RegionTally? {
         val mask = regionMask() ?: return null
-        val cells = exploration.groundKeys()
+        val cells = exploration.index.snapshotKeys()
         return withContext(Dispatchers.Default) { RegionBreakdown.of(mask, cells) }
     }
 
