@@ -27,6 +27,9 @@ are for map tiles and (optionally) naming the countries you pass through.
   rather than straight across the map. It is tinted blue rather than left clear, and left out of
   the continent, country and state figures, because passing over a country at ten kilometres is
   not being there.
+- **Android Auto.** The same fog map on the car screen, with the squares filling in as you drive,
+  plus a status line that tells you tracking is actually alive and a button to start or stop it.
+  Sideload-only by design - see below.
 - **Your data stays yours.** Export a full backup as JSON, the uncovered area as GeoJSON, or your
   trail as GPX. Import a backup to merge an old phone's map into this one.
 - **Rescue a trip it missed.** Import a Google Maps Timeline export or a GPX from any other
@@ -158,10 +161,11 @@ consistent, so progress over time is meaningful, but it is not a survey.
 
 ```
 core/   Plain Kotlin/JVM. Tile maths, the fog engine, the explored-cell index,
-        statistics, the region atlas and the backup/GPX/GeoJSON formats. No
-        Android types, so it is unit-tested on the JVM with no emulator.
-app/    Everything Android: Room storage, the location service, and a Compose UI
-        over an osmdroid map.
+        statistics, the region atlas, the car viewport and the backup/GPX/GeoJSON
+        formats. No Android types, so it is unit-tested on the JVM with no
+        emulator.
+app/    Everything Android: Room storage, the location service, a Compose UI over
+        an osmdroid map, and the Android Auto screen.
 tools/  The script that builds the region atlas from public boundary data. Run
         by hand; its output is committed.
 ```
@@ -195,6 +199,38 @@ Two other rules keep it honest:
   aircraft goes.
 
 Turn the whole thing off under Settings → Recording if you would rather flights left the map alone.
+
+## Android Auto
+
+The car screen shows the real map: OpenStreetMap tiles, your cleared squares punched out of the
+fog, flown ground tinted blue, your position, and a status line along the bottom. Recentre and zoom
+buttons on the map strip, start/stop on the action strip.
+
+Three things about it are worth knowing before you install it.
+
+**It is declared as a navigation app, and that is a one-way door.** The Car App Library only hands
+a drawing surface to apps in the `NAVIGATION` category. Without a surface there is no map, only
+lists of text - so navigation it is. The consequence is that this build could never be published on
+Google Play: it would be reviewed against the turn-by-turn navigation guidelines, which it makes no
+attempt to meet. That costs nothing here, because the only way this app is installed is by
+sideloading it.
+
+**Android Auto will not list it until you allow unknown sources.** On the phone: Android Auto
+settings → tap Version repeatedly to unlock Developer settings → ⋮ → Developer settings → tick
+**Unknown sources**. A sideloaded car app is invisible without it.
+
+**The map is drawn by hand, because it has to be.** On the phone, osmdroid owns a `MapView` and the
+fog is an overlay on top of it. The car hands over a bare `Surface`, and an Android `View` cannot be
+attached to one. So `CarMapRenderer` assembles the frame itself - tiles, then fog, then position,
+then the status line - while osmdroid still does the hard part: its tile provider works perfectly
+well with no map view attached, which keeps the disk cache, the OpenStreetMap usage policy and the
+user agent identical to the phone instead of growing a second tile stack that gets them wrong.
+
+The pixel arithmetic that osmdroid's `Projection` would normally do lives in `Viewport`, in the
+`core` module with no Android in it, so it is unit-tested on the JVM rather than being something
+only a head unit can check. The status line is painted onto the canvas rather than put in a
+navigation template on purpose: template hosts have opinions about what navigation information may
+say and when, and this app is not guiding anyone anywhere.
 
 ## Counting continents, countries and states
 

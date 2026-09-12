@@ -21,4 +21,10 @@ data class GeoBounds(
         get() = if (crossesAntimeridian) (east + 360.0) - west else east - west
 
     val latitudeSpan: Double get() = north - south
+
+    val centerLatitude: Double get() = (north + south) / 2.0
+
+    /** Middle of the box the way the box actually runs, so a wrapped box centres on the Pacific. */
+    val centerLongitude: Double
+        get() = TileMath.normalizeLongitude(west + longitudeSpan / 2.0)
 }

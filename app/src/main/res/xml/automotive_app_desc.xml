@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Tells Android Auto this app speaks the Car App Library's template protocol, rather than being a
+  media or messaging app. Without this file the car never looks for the CarAppService at all.
+-->
+<automotiveApp>
+    <uses name="template" />
+</automotiveApp>

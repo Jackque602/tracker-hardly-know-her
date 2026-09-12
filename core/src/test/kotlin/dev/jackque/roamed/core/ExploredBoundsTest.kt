@@ -137,6 +137,28 @@ class ExploredBoundsTest {
     }
 
     @Test
+    fun `the centre of a box is inside it`() {
+        val bounds = assertNotNull(indexOf(51.5074 to -0.1278, 48.8566 to 2.3522).bounds())
+        assertTrue(bounds.centerLatitude in bounds.south..bounds.north)
+        assertTrue(bounds.centerLongitude in bounds.west..bounds.east)
+        assertEquals(50.18, bounds.centerLatitude, 0.05)
+        assertEquals(1.11, bounds.centerLongitude, 0.05)
+    }
+
+    @Test
+    fun `the centre of a wrapped box lands in the Pacific, not in Africa`() {
+        // Tokyo and San Francisco. Averaging the two longitudes naively gives about 8 degrees,
+        // which is the Gulf of Guinea - the wrong side of the planet entirely.
+        val bounds = assertNotNull(indexOf(35.6762 to 139.6503, 37.7749 to -122.4194).bounds())
+        assertTrue(bounds.crossesAntimeridian)
+        val center = bounds.centerLongitude
+        assertTrue(
+            center > 170.0 || center < -170.0,
+            "the middle of that pair is the date line, got $center",
+        )
+    }
+
+    @Test
     fun `clearing removes the bounds`() {
         val index = indexOf(51.5 to -0.12)
         assertNotNull(index.bounds())

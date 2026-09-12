@@ -16,6 +16,14 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!--
+      Android Auto. ACCESS_SURFACE is what lets the app draw its own map on the car screen rather
+      than being limited to lists of text; NAVIGATION_TEMPLATES is what lets it use the only
+      template that comes with a surface.
+    -->
+    <uses-permission android:name="androidx.car.app.ACCESS_SURFACE" />
+    <uses-permission android:name="androidx.car.app.NAVIGATION_TEMPLATES" />
+
     <uses-feature
         android:name="android.hardware.location.gps"
         android:required="false" />
@@ -48,6 +56,36 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="location" />
+
+        <!--
+          Android Auto looks for this file before it looks for anything else; without it the car
+          never goes hunting for a CarAppService at all.
+        -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+
+        <!--
+          The oldest car host this build will talk to. Level 2 is where a navigation template may
+          carry its own strip of map controls, which is what the zoom and recentre buttons need.
+        -->
+        <meta-data
+            android:name="androidx.car.app.minCarApiLevel"
+            android:value="2" />
+
+        <!--
+          Declared as a navigation app because that is the only category the Car App Library hands
+          a drawing surface to, and without one there is no map to show. See RoamedCarAppService
+          for what that costs.
+        -->
+        <service
+            android:name=".car.RoamedCarAppService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="androidx.car.app.CarAppService" />
+                <category android:name="androidx.car.app.category.NAVIGATION" />
+            </intent-filter>
+        </service>
 
         <receiver
             android:name=".location.BootReceiver"

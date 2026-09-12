@@ -145,6 +145,10 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.play.services.location)
     implementation(libs.osmdroid.android)
+
+    // Android Auto. app-projected is the half that talks to a phone-projected car screen.
+    implementation(libs.androidx.car.app)
+    implementation(libs.androidx.car.app.projected)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
 
